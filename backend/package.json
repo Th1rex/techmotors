@@ -4,7 +4,7 @@
   "description": "TechMotors - API REST para agendamentos automotivos",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "npm rebuild better-sqlite3 && tsc",
     "start": "node dist/server.js",
     "dev": "ts-node src/server.ts",
     "setup": "ts-node src/setup.ts",
