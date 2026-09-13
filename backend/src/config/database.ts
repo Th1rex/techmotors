@@ -4,9 +4,14 @@ import path from 'path';
 import bcrypt from 'bcryptjs';
 import Database from 'better-sqlite3';
 
-const DB_PATH = path.join(__dirname, '../../data/techmotors.db');
+const isServerless = Boolean(process.env.VERCEL);
+const DB_PATH = process.env.DATABASE_PATH
+  ? path.resolve(process.env.DATABASE_PATH)
+  : isServerless
+    ? path.join('/tmp', 'techmotors.db')
+    : path.join(__dirname, '../../data/techmotors.db');
 
-// Criar diretório data se não existir
+// O filesystem de funções serverless só permite gravação em /tmp.
 const dataDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });

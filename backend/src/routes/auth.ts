@@ -13,7 +13,9 @@ import { gerarToken, autenticar, AuthRequest } from '../middleware/auth';
 const router = Router();
 
 // Configuração do multer para upload de fotos
-const uploadsDir = path.join(__dirname, '../../../frontend/uploads');
+const uploadsDir = process.env.VERCEL
+  ? path.join('/tmp', 'techmotors-uploads')
+  : path.join(__dirname, '../../../frontend/uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
 const storage = multer.diskStorage({
