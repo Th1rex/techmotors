@@ -137,6 +137,31 @@ body {
 }
 .card-oficina:hover::before { opacity: 1; }
 
+/* ── Cards de destaque da landing — feedback ao passar o mouse ── */
+.card-feature {
+  border: 1px solid transparent; /* reservado desde o início: sem pulo no hover */
+}
+.card-feature:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--tm-primary-light);
+}
+.card-feature:hover .categoria-icon {
+  color: var(--tm-accent);
+  transform: scale(1.12);
+}
+
+/* ── Entrada escalonada — o atraso de cada item vem da var --d ──
+   Aplicar no elemento PAI de quem tem :hover — animation com fill-mode
+   sobrescreve o transform do :hover e mataria o efeito. */
+.anim-up {
+  animation: animUp .55s cubic-bezier(.4,0,.2,1) var(--d, 0s) both;
+}
+@keyframes animUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* ── Hero — Clean modern gradient with glass morphism search ── */
 .hero {
   background: linear-gradient(160deg, var(--tm-dark) 0%, var(--tm-primary) 50%, var(--tm-primary-light) 100%);
@@ -171,6 +196,46 @@ body {
 }
 .hero .search-glass .form-control:focus {
   box-shadow: 0 0 0 3px rgba(249,115,22,.3);
+}
+
+/* ── Hero title — brilho que percorre o nome uma vez ao carregar
+   (técnica adaptada de text-effects.colorion.co, MIT) ── */
+.hero-title {
+  display: inline-block;
+  color: #fff; /* fallback p/ navegador sem background-clip: text */
+}
+@supports (-webkit-background-clip: text) or (background-clip: text) {
+  .hero-title {
+    background-image: linear-gradient(
+      100deg,
+      #fff 0%,
+      #fff 42%,
+      var(--tm-accent-light) 50%,
+      #fff 58%,
+      #fff 100%
+    );
+    background-size: 250% 100%;
+    background-repeat: no-repeat;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: heroShine 2.8s cubic-bezier(.4,0,.2,1) .7s both;
+  }
+}
+@keyframes heroShine {
+  from { background-position: 100% 0; }
+  to   { background-position: 0% 0; }
+}
+/* Sem animação: brilho parado no meio da palavra, conteúdo já visível e
+   hover sem deslocamento — o realce de cor/sombra continua funcionando. */
+@media (prefers-reduced-motion: reduce) {
+  .hero-title {
+    animation: none;
+    background-position: 50% 0;
+  }
+  .anim-up { animation: none; }
+  .card-feature:hover { transform: none; }
+  .card-feature:hover .categoria-icon { transform: none; }
 }
 
 /* ── Categorias — Pill style with icons ── */
@@ -546,6 +611,13 @@ body {
 .navbar-brand .brand-icon i {
   font-size: 1.4rem;
   color: #fff;
+}
+/* Monograma TM — SVG inline, sem depender do CDN de ícones */
+.navbar-brand .brand-icon .brand-mark {
+  width: 24px;
+  height: 24px;
+  color: #fff;
+  display: block;
 }
 .navbar-brand .brand-text {
   display: flex;

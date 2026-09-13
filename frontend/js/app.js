@@ -224,24 +224,24 @@ function renderLanding(el) {
   el.innerHTML = `
     <div class="hero text-center">
       <div class="container">
-        <h1 class="display-4 fw-bold"><i class="bi bi-wrench-adjustable-circle"></i> TechMotors</h1>
-        <p class="lead">Agende serviços automotivos em oficinas de confiança — sem complicação</p>
-        <div class="mt-4">
+        <h1 class="display-4 fw-bold anim-up" style="--d:.05s"><i class="bi bi-wrench-adjustable-circle"></i> <span class="hero-title">TechMotors</span></h1>
+        <p class="lead anim-up" style="--d:.18s">Agende serviços automotivos em oficinas de confiança — sem complicação</p>
+        <div class="mt-4 anim-up" style="--d:.3s">
           <a href="#cadastro?tipo=cliente" class="btn btn-tm-accent btn-lg me-2"><i class="bi bi-person-plus"></i> Sou Cliente</a>
           <a href="#cadastro?tipo=oficina" class="btn btn-light btn-lg"><i class="bi bi-shop"></i> Sou Oficina</a>
         </div>
       </div>
     </div>
     <div class="row mt-5 g-4">
-      <div class="col-md-4"><div class="card p-4 h-100 text-center">
+      <div class="col-md-4 anim-up" style="--d:.42s"><div class="card card-feature p-4 h-100 text-center">
         <i class="bi bi-search categoria-icon"></i><h5 class="mt-3">Encontre oficinas</h5>
         <p class="text-muted">Busque por serviço, localização e veja avaliações reais.</p>
       </div></div>
-      <div class="col-md-4"><div class="card p-4 h-100 text-center">
+      <div class="col-md-4 anim-up" style="--d:.52s"><div class="card card-feature p-4 h-100 text-center">
         <i class="bi bi-calendar-check categoria-icon"></i><h5 class="mt-3">Agende em segundos</h5>
         <p class="text-muted">Escolha data e horário e receba confirmação imediata.</p>
       </div></div>
-      <div class="col-md-4"><div class="card p-4 h-100 text-center">
+      <div class="col-md-4 anim-up" style="--d:.62s"><div class="card card-feature p-4 h-100 text-center">
         <i class="bi bi-shield-check categoria-icon"></i><h5 class="mt-3">Pagamento presencial</h5>
         <p class="text-muted">Sem intermediação financeira — você paga direto na oficina.</p>
       </div></div>

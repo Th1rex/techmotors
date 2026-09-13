@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="TechMotors">
+  <title>TechMotors</title>
+  <defs>
+    <linearGradient id="tmBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1E3A8A"/>
+      <stop offset="0.5" stop-color="#1E40AF"/>
+      <stop offset="1" stop-color="#3B82F6"/>
+    </linearGradient>
+    <radialGradient id="tmGlow" cx="0.85" cy="0.9" r="0.6">
+      <stop offset="0" stop-color="#F97316" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#F97316" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Fundo: quadrado arredondado azul com brilho laranja no canto inferior direito -->
+  <rect width="64" height="64" rx="15" fill="url(#tmBg)"/>
+  <rect width="64" height="64" rx="15" fill="url(#tmGlow)"/>
+
+  <!-- Monograma TM em paths geometricos (sem <text>: nao depende de fonte) -->
+  <path d="M11 21 H31 V27 H24 V43 H18 V27 H11 Z" fill="#FFFFFF"/>
+  <path d="M33 43 V21 H38 L43 31 L48 21 H53 V43 H48 V31.5 L44.5 38 H41.5 L38 31.5 V43 Z" fill="#FB923C"/>
+</svg>
