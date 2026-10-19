@@ -4,14 +4,18 @@ async function renderOficinaAguardando(el) {
   el.innerHTML = '<div class="loading">Carregando...</div>';
   const data = await api('/oficina/status');
   const o = data.oficina;
-  if (o && o.status_aprovacao === 'aprovada') { navegarPara('oficina-agenda'); return; }
+  if (o && o.status_aprovacao === 'aprovada') {
+    navegarPara('oficina-agenda');
+    return;
+  }
+  const rejeitada = o && o.status_aprovacao === 'rejeitada';
 
   el.innerHTML = `
     <div class="row justify-content-center"><div class="col-md-6"><div class="card p-4 text-center">
-      <i class="bi bi-hourglass-split" style="font-size:4rem;color:var(--tm-accent)"></i>
-      <h3 class="mt-3">Aguardando aprovação</h3>
-      <p class="text-muted">Seu cadastro está em análise pelo administrador.</p>
-      ${o && o.status_aprovacao === 'rejeitada' ? `<div class="alert alert-danger"><strong>Cadastro rejeitado.</strong><br>${escapeHtml(o.motivo_rejeicao || '')}</div>` : ''}
+      <i class="bi ${rejeitada ? 'bi-x-circle text-danger' : 'bi-hourglass-split'}" style="font-size:4rem;${rejeitada ? '' : 'color:var(--tm-accent)'}"></i>
+      <h3 class="mt-3">${rejeitada ? 'Cadastro não aprovado' : 'Aguardando aprovação'}</h3>
+      <p class="text-muted">${rejeitada ? 'O administrador não aprovou o cadastro da oficina. Entre em contato com o suporte para saber como prosseguir.' : 'Seu cadastro está em análise pelo administrador. Os recursos da oficina serão liberados após a aprovação.'}</p>
+      ${rejeitada && o.motivo_rejeicao ? `<div class="alert alert-danger text-start"><strong>Motivo:</strong><br>${escapeHtml(o.motivo_rejeicao)}</div>` : ''}
       <div class="text-start mt-4">
         <strong>Dados enviados:</strong>
         <ul>
@@ -19,7 +23,15 @@ async function renderOficinaAguardando(el) {
           <li>CNPJ: ${escapeHtml(o?.cnpj || '')}</li>
         </ul>
       </div>
+      <button id="btn-verificar-aprovacao" class="btn btn-outline-primary mt-3"><i class="bi bi-arrow-clockwise"></i> Verificar aprovação</button>
     </div></div></div>`;
+  document.getElementById('btn-verificar-aprovacao').addEventListener('click', async () => {
+    try {
+      await renderOficinaAguardando(el);
+    } catch (err) {
+      showToast(err.error || 'Não foi possível verificar a aprovação.', 'error');
+    }
+  });
 }
 
 async function verDetalheAgendamento(id) {
@@ -361,50 +373,143 @@ async function renderOficinaServicos(el) {
   el.innerHTML = '<div class="loading">Carregando...</div>';
   const data = await api('/oficina/servicos');
 
-  let catOptions = data.catalogo.map(c => `<option value="${c.id}">${escapeHtml(c.nome)} (${escapeHtml(c.categoria)})</option>`).join('');
-
-  let meusHtml = data.meus_servicos.map(s => `
-    <tr>
-      <td>${escapeHtml(s.servico_nome)}</td>
-      <td>${escapeHtml(s.preco_modalidade)}</td>
-      <td>${fmtMoney(s.preco)}</td>
-      <td>${s.duracao_minutos} min</td>
-      <td><button class="btn btn-sm btn-outline-danger" onclick="excluirServico(${s.id})"><i class="bi bi-trash"></i></button></td>
-    </tr>`).join('');
+  const categoriasPadrao = [
+    'Manutenção Preventiva',
+    'Suspensão',
+    'Freios',
+    'Pneus',
+    'Elétrica',
+    'Climatização',
+    'Diagnóstico'
+  ];
+  const categorias = [...new Set([...categoriasPadrao, ...data.categorias.map(c => c.categoria).filter(Boolean)])];
+  const categoriaOptions = categorias.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  const modalidadeLabel = { fixo: 'Preço fixo', a_partir_de: 'A partir de', orcamento: 'Sob orçamento' };
+  const meusHtml = data.meus_servicos.length
+    ? data.meus_servicos.map(s => `
+      <tr>
+        <td><strong>${escapeHtml(s.servico_nome)}</strong>${s.descricao ? `<div class="small text-muted">${escapeHtml(s.descricao)}</div>` : ''}</td>
+        <td>${escapeHtml(s.categoria || '—')}</td>
+        <td>${modalidadeLabel[s.preco_modalidade] || escapeHtml(s.preco_modalidade)}</td>
+        <td>${s.preco_modalidade === 'orcamento' ? 'Sob consulta' : fmtMoney(s.preco)}</td>
+        <td>${s.duracao_minutos} min</td>
+        <td class="text-nowrap">
+          <button type="button" class="btn btn-sm btn-outline-primary me-1" data-editar-servico="${s.id}" aria-label="Editar ${escapeHtml(s.servico_nome)}"><i class="bi bi-pencil"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-excluir-servico="${s.id}" aria-label="Remover ${escapeHtml(s.servico_nome)}"><i class="bi bi-trash"></i></button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" class="text-center text-muted py-4">Você ainda não cadastrou serviços. Adicione o primeiro acima.</td></tr>';
 
   el.innerHTML = `
     <h3 class="mb-3"><i class="bi bi-tools text-tm-primary"></i> Serviços Oferecidos</h3>
     <div class="card p-4 mb-4">
-      <h5>Adicionar serviço do catálogo</h5>
-      <form id="form-servico" class="row g-2">
-        <div class="col-md-4"><label class="form-label small">Serviço</label><select id="srv-id" class="form-select" required><option value="">Selecione...</option>${catOptions}</select></div>
-        <div class="col-md-3"><label class="form-label small">Modalidade</label><select id="srv-mod" class="form-select"><option value="fixo">Fixo</option><option value="a_partir_de" selected>A partir de</option><option value="orcamento">Sob orçamento</option></select></div>
-        <div class="col-md-2"><label class="form-label small">Preço (R$)</label><input type="number" step="0.01" id="srv-preco" class="form-control"></div>
-        <div class="col-md-2"><label class="form-label small">Duração (min)</label><input type="number" id="srv-dur" class="form-control" value="60" required></div>
-        <div class="col-md-1 d-flex align-items-end"><button class="btn btn-tm-primary w-100">+</button></div>
+      <h5 id="titulo-form-servico">Cadastrar serviço</h5>
+      <p class="text-muted small">Defina os serviços, preços e duração que sua oficina oferece aos clientes.</p>
+      <form id="form-servico" class="row g-3">
+        <input type="hidden" id="srv-id">
+        <div class="col-md-4"><label for="srv-nome" class="form-label">Nome do serviço *</label><input id="srv-nome" class="form-control" list="srv-sugestoes" maxlength="100" placeholder="Ex.: Troca de óleo" required><datalist id="srv-sugestoes"><option value="Scanner / Diagnóstico"></datalist></div>
+        <div class="col-md-3">
+          <label for="srv-categoria" class="form-label">Categoria *</label>
+          <select id="srv-categoria" class="form-select" required>
+            <option value="">Selecione uma categoria...</option>
+            ${categoriaOptions}
+            <option value="__outra__">Outra categoria...</option>
+          </select>
+          <input id="srv-categoria-outra" class="form-control mt-2 d-none" maxlength="80" placeholder="Digite uma nova categoria" aria-label="Nova categoria">
+        </div>
+        <div class="col-md-5"><label for="srv-descricao" class="form-label">Descrição</label><input id="srv-descricao" class="form-control" maxlength="250" placeholder="Detalhes do serviço (opcional)"></div>
+        <div class="col-md-4"><label for="srv-mod" class="form-label">Como informar o preço?</label><select id="srv-mod" class="form-select"><option value="fixo">Preço fixo</option><option value="a_partir_de" selected>A partir de</option><option value="orcamento">Sob orçamento</option></select></div>
+        <div class="col-md-3"><label for="srv-preco" class="form-label">Preço (R$)</label><input type="number" min="0" step="0.01" id="srv-preco" class="form-control" placeholder="Ex.: 120,00"></div>
+        <div class="col-md-3"><label for="srv-dur" class="form-label">Duração estimada (min) *</label><input type="number" min="1" max="1440" id="srv-dur" class="form-control" value="60" required></div>
+        <div class="col-md-2 d-flex align-items-end"><button id="btn-salvar-servico" class="btn btn-tm-primary w-100"><i class="bi bi-plus-lg"></i> Adicionar</button></div>
+        <div class="col-12"><button type="button" id="btn-cancelar-edicao" class="btn btn-outline-secondary d-none">Cancelar edição</button></div>
       </form>
     </div>
     <div class="card p-3">
-      <table class="table"><thead><tr><th>Serviço</th><th>Modalidade</th><th>Preço</th><th>Duração</th><th></th></tr></thead><tbody>${meusHtml}</tbody></table>
+      <div class="d-flex justify-content-between align-items-center mb-2"><h5 class="mb-0">Seus serviços</h5><span class="text-muted small">${data.meus_servicos.length} serviço(s)</span></div>
+      <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Serviço</th><th>Categoria</th><th>Modalidade</th><th>Preço</th><th>Duração</th><th>Ações</th></tr></thead><tbody>${meusHtml}</tbody></table></div>
     </div>`;
+
+  const form = document.getElementById('form-servico');
+  const inputPreco = document.getElementById('srv-preco');
+  const selectModalidade = document.getElementById('srv-mod');
+  const selectCategoria = document.getElementById('srv-categoria');
+  const inputCategoriaOutra = document.getElementById('srv-categoria-outra');
+  const updateCategoriaField = () => {
+    const outraCategoria = selectCategoria.value === '__outra__';
+    inputCategoriaOutra.classList.toggle('d-none', !outraCategoria);
+    inputCategoriaOutra.required = outraCategoria;
+    if (!outraCategoria) inputCategoriaOutra.value = '';
+  };
+  const updatePrecoField = () => {
+    const sobOrcamento = selectModalidade.value === 'orcamento';
+    inputPreco.disabled = sobOrcamento;
+    inputPreco.required = !sobOrcamento;
+    if (sobOrcamento) inputPreco.value = '';
+  };
+  const resetForm = () => {
+    form.reset();
+    document.getElementById('srv-id').value = '';
+    document.getElementById('titulo-form-servico').textContent = 'Cadastrar serviço';
+    document.getElementById('btn-salvar-servico').innerHTML = '<i class="bi bi-plus-lg"></i> Adicionar';
+    document.getElementById('btn-cancelar-edicao').classList.add('d-none');
+    updateCategoriaField();
+    updatePrecoField();
+  };
+  selectCategoria.addEventListener('change', updateCategoriaField);
+  selectModalidade.addEventListener('change', updatePrecoField);
+  updateCategoriaField();
+  updatePrecoField();
+  document.getElementById('btn-cancelar-edicao').addEventListener('click', resetForm);
+
+  el.querySelectorAll('[data-editar-servico]').forEach(button => {
+    button.addEventListener('click', () => {
+      const service = data.meus_servicos.find(s => s.id === Number(button.dataset.editarServico));
+      if (!service) return;
+      document.getElementById('srv-id').value = service.id;
+      document.getElementById('srv-nome').value = service.servico_nome;
+      const categoriaCadastrada = categorias.includes(service.categoria);
+      selectCategoria.value = categoriaCadastrada ? service.categoria : '__outra__';
+      inputCategoriaOutra.value = categoriaCadastrada ? '' : (service.categoria || '');
+      document.getElementById('srv-descricao').value = service.descricao || '';
+      selectModalidade.value = service.preco_modalidade;
+      inputPreco.value = service.preco ?? '';
+      document.getElementById('srv-dur').value = service.duracao_minutos;
+      document.getElementById('titulo-form-servico').textContent = 'Editar serviço';
+      document.getElementById('btn-salvar-servico').innerHTML = '<i class="bi bi-check-lg"></i> Salvar';
+      document.getElementById('btn-cancelar-edicao').classList.remove('d-none');
+      updateCategoriaField();
+      updatePrecoField();
+      document.getElementById('srv-nome').focus();
+    });
+  });
+  el.querySelectorAll('[data-excluir-servico]').forEach(button => {
+    button.addEventListener('click', () => excluirServico(Number(button.dataset.excluirServico)));
+  });
 
   document.getElementById('form-servico').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      await api('/oficina/servicos', { method: 'POST', body: {
-        servico_id: parseInt(document.getElementById('srv-id').value),
+      const id = document.getElementById('srv-id').value;
+      const categoria = selectCategoria.value === '__outra__'
+        ? inputCategoriaOutra.value.trim()
+        : selectCategoria.value;
+      await api(id ? `/oficina/servicos/${id}` : '/oficina/servicos', { method: id ? 'PUT' : 'POST', body: {
+        nome: document.getElementById('srv-nome').value.trim(),
+        categoria,
+        descricao: document.getElementById('srv-descricao').value.trim(),
         preco_modalidade: document.getElementById('srv-mod').value,
-        preco: document.getElementById('srv-preco').value || null,
+        preco: document.getElementById('srv-preco').value,
         duracao: parseInt(document.getElementById('srv-dur').value)
       }});
-      showToast('Serviço adicionado.', 'success');
+      showToast(id ? 'Serviço atualizado.' : 'Serviço adicionado.', 'success');
       await renderOficinaServicos(el);
     } catch (err) { showToast(err.error || 'Erro', 'error'); }
   });
 }
 
 async function excluirServico(id) {
-  if (!confirm('Remover serviço?')) return;
+  if (!confirm('Remover este serviço da lista oferecida pela sua oficina?')) return;
   try {
     await api(`/oficina/servicos/${id}`, { method: 'DELETE' });
     showToast('Serviço removido.', 'success');
@@ -497,7 +602,10 @@ async function renderOficinaMetricas(el) {
     : '<tr><td colspan="6" class="text-center text-muted py-3">Nenhum atendimento concluído</td></tr>';
 
   el.innerHTML = `
-    <h3 class="mb-4"><i class="bi bi-graph-up text-tm-primary"></i> Painel da Oficina</h3>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+      <h3 class="mb-0"><i class="bi bi-graph-up text-tm-primary"></i> Painel da Oficina</h3>
+      <button id="btn-exportar-metricas-oficina" class="btn btn-outline-success"><i class="bi bi-filetype-csv"></i> Exportar CSV</button>
+    </div>
 
     <!-- Dashboard rápido -->
     <div class="row g-3 mb-4">
@@ -590,6 +698,19 @@ async function renderOficinaMetricas(el) {
         </table>
       </div>
     </div>`;
+
+  document.getElementById('btn-exportar-metricas-oficina').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await baixarCsv('/oficina/metricas/exportar', 'techmotors-metricas-oficina.csv');
+      showToast('Métricas da oficina exportadas.', 'success');
+    } catch (err) {
+      showToast(err.error || err.message || 'Erro ao exportar métricas.', 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
 }
 
 // ─── NOTIFICAÇÕES DA OFICINA ────────────────────────

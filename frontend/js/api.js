@@ -55,6 +55,33 @@ async function api(endpoint, options = {}) {
   return data;
 }
 
+async function baixarCsv(endpoint, filename) {
+  const headers = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const response = await fetch(`${API_BASE}${endpoint}`, { headers });
+  if (response.status === 401) {
+    clearAuth();
+    navegarPara('login');
+    throw new Error('Sessão expirada');
+  }
+  if (!response.ok) {
+    const data = await response.json();
+    throw { status: response.status, ...data };
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 // Helpers de formatação
 function fmtData(d) {
   if (!d) return '';

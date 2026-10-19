@@ -160,6 +160,10 @@ export function initDatabase() {
       ativo INTEGER DEFAULT 1
     );
 
+    CREATE TABLE IF NOT EXISTS migracoes (
+      nome TEXT PRIMARY KEY
+    );
+
     CREATE TABLE IF NOT EXISTS oficina_servicos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       oficina_id INTEGER NOT NULL,
@@ -254,6 +258,43 @@ export function initDatabase() {
   if (count.c === 0) {
     seedDatabase();
   }
+
+  migrateServicesToWorkshops();
+}
+
+function migrateServicesToWorkshops() {
+  const migrationName = 'servicos_proprios_por_oficina';
+  if (db.prepare('SELECT nome FROM migracoes WHERE nome=?').get(migrationName)) return;
+
+  const transaction = db.transaction(() => {
+    const offerings = db
+      .prepare(
+        `SELECT os.id, cs.nome, cs.categoria, cs.descricao, cs.ativo
+         FROM oficina_servicos os
+         JOIN catalogo_servicos cs ON cs.id=os.servico_id
+         ORDER BY os.id`
+      )
+      .all() as Array<{
+      id: number;
+      nome: string;
+      categoria: string | null;
+      descricao: string | null;
+      ativo: number;
+    }>;
+    const insertService = db.prepare(
+      'INSERT INTO catalogo_servicos (nome, categoria, descricao, ativo) VALUES (?, ?, ?, ?)'
+    );
+    const updateOffering = db.prepare('UPDATE oficina_servicos SET servico_id=? WHERE id=?');
+
+    for (const offering of offerings) {
+      const service = insertService.run(offering.nome, offering.categoria, offering.descricao, offering.ativo);
+      updateOffering.run(service.lastInsertRowid, offering.id);
+    }
+
+    db.prepare('INSERT INTO migracoes (nome) VALUES (?)').run(migrationName);
+  });
+
+  transaction();
 }
 
 function seedDatabase() {

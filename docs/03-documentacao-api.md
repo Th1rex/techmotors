@@ -71,9 +71,12 @@
 | GET | `/oficina/perfil` | Dados do perfil da oficina |
 | PUT | `/oficina/perfil` | Atualizar perfil |
 | GET | `/oficina/metricas` | Dashboard + métricas |
+| GET | `/oficina/metricas/exportar` | Exportar métricas e histórico da oficina em CSV |
 | GET | `/oficina/historico` | Histórico de atendimentos |
 | GET | `/oficina/notificacoes` | Notificações da oficina |
 | POST | `/oficina/notificacoes/ler` | Marcar como lidas |
+
+Enquanto a oficina estiver pendente ou rejeitada, somente `GET /oficina/status` fica disponível. As demais rotas exigem aprovação administrativa.
 
 ---
 
@@ -82,6 +85,7 @@
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | GET | `/admin/dashboard` | Estatísticas gerais |
+| GET | `/admin/metricas/exportar` | Exportar indicadores, oficinas e agendamentos em CSV |
 | GET | `/admin/pendentes` | Oficinas aguardando aprovação |
 | POST | `/admin/aprovar/:id` | Aprovar oficina |
 | POST | `/admin/rejeitar/:id` | Rejeitar oficina (com motivo) |

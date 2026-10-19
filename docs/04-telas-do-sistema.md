@@ -64,9 +64,8 @@ Abaixo estão listadas todas as telas do sistema com instruções de como acess�
 | 33 | Aprovações | `#admin-pendentes` | Oficinas aguardando, aprovar/rejeitar |
 | 34 | Usuários | `#admin-usuarios` | Lista com busca por nome/e-mail, filtro por tipo/status, clique para detalhes |
 | 35 | Detalhe do Usuário | `#admin-usuario?id=2` | Tudo sobre o usuário: dados, veículos, agendamentos, avaliações |
-| 36 | Catálogo de Serviços | `#admin-catalogo` | CRUD de serviços globais organizados por categoria |
-| 37 | Ranking | `#admin-ranking` | Ranking de oficinas por nota e por volume de agendamentos |
-| 38 | Moderação de Avaliações | `#admin-avaliacoes` | Ver todas as avaliações, ocultar/restaurar as ofensivas |
+| 36 | Ranking | `#admin-ranking` | Ranking de oficinas por nota e por volume de agendamentos |
+| 37 | Moderação de Avaliações | `#admin-avaliacoes` | Ver todas as avaliações, ocultar/restaurar as ofensivas |
 
 ---
 

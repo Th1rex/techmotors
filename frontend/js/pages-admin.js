@@ -30,7 +30,10 @@ async function renderAdminDashboard(el) {
     </tr>`).join('');
 
   el.innerHTML = `
-    <h3 class="mb-4"><i class="bi bi-speedometer2 text-tm-primary"></i> Dashboard Administrativo</h3>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+      <h3 class="mb-0"><i class="bi bi-speedometer2 text-tm-primary"></i> Dashboard Administrativo</h3>
+      <button id="btn-exportar-metricas-admin" class="btn btn-outline-success"><i class="bi bi-filetype-csv"></i> Exportar CSV</button>
+    </div>
     <div class="row g-3 mb-4">
       <div class="col-6 col-md-2"><div class="card p-3 text-center"><div class="text-muted small">Clientes</div><h3>${data.total_clientes}</h3></div></div>
       <div class="col-6 col-md-2"><div class="card p-3 text-center"><div class="text-muted small">Oficinas</div><h3 class="text-success">${data.total_oficinas}</h3></div></div>
@@ -61,6 +64,19 @@ async function renderAdminDashboard(el) {
         </table>
       </div>
     </div>`;
+
+  document.getElementById('btn-exportar-metricas-admin').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await baixarCsv('/admin/metricas/exportar', 'techmotors-metricas-admin.csv');
+      showToast('Métricas administrativas exportadas.', 'success');
+    } catch (err) {
+      showToast(err.error || err.message || 'Erro ao exportar métricas.', 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
 }
 
 // ─── APROVAÇÕES ─────────────────────────────────────
@@ -304,92 +320,6 @@ async function renderAdminUsuarioDetalhe(el, params) {
       <div class="small text-muted mt-2">Cadastrado em ${fmtData(u.criado_em)}</div>
     </div>
     ${conteudoExtra}`;
-}
-
-// ─── CATÁLOGO DE SERVIÇOS ───────────────────────────
-async function renderAdminCatalogo(el) {
-  el.innerHTML = '<div class="loading">Carregando...</div>';
-  const data = await api('/admin/catalogo');
-
-  // Agrupar por categoria
-  const categorias = {};
-  data.servicos.forEach(s => {
-    if (!categorias[s.categoria]) categorias[s.categoria] = [];
-    categorias[s.categoria].push(s);
-  });
-
-  let catalogoHtml = Object.entries(categorias).map(([cat, servicos]) => `
-    <div class="mb-3">
-      <h6 class="fw-bold small text-uppercase text-muted">${escapeHtml(cat)}</h6>
-      ${servicos.map(s => `
-        <div class="d-flex justify-content-between align-items-center py-2 border-bottom" style="border-color:var(--tm-gray-100)!important">
-          <div>
-            <span class="${!s.ativo ? 'text-decoration-line-through text-muted' : ''}">${escapeHtml(s.nome)}</span>
-            ${s.descricao ? `<span class="small text-muted ms-1">(${escapeHtml(s.descricao)})</span>` : ''}
-            ${!s.ativo ? '<span class="badge bg-secondary ms-1">Inativo</span>' : ''}
-          </div>
-          <div class="d-flex gap-1">
-            <button class="btn btn-sm btn-outline-primary" onclick="editarServicoCatalogo(${s.id}, '${escapeHtml(s.nome)}', '${escapeHtml(s.categoria)}', '${escapeHtml(s.descricao||'')}', ${s.ativo})"><i class="bi bi-pencil"></i></button>
-            <button class="btn btn-sm btn-outline-danger" onclick="excluirServicoCatalogo(${s.id})"><i class="bi bi-trash3"></i></button>
-          </div>
-        </div>`).join('')}
-    </div>`).join('');
-
-  el.innerHTML = `
-    <h3 class="mb-4"><i class="bi bi-journal-text text-tm-primary"></i> Catálogo de Serviços</h3>
-    <div class="card p-4 mb-3">
-      <h6 class="fw-bold mb-3">Adicionar Serviço</h6>
-      <form id="form-add-catalogo" class="row g-2 align-items-end">
-        <div class="col-md-3"><label class="form-label">Nome *</label><input id="cat-nome" class="form-control" required></div>
-        <div class="col-md-3"><label class="form-label">Categoria *</label><input id="cat-categoria" class="form-control" list="cat-lista" required>
-          <datalist id="cat-lista">${Object.keys(categorias).map(c => `<option value="${c}">`).join('')}</datalist></div>
-        <div class="col-md-4"><label class="form-label">Descrição</label><input id="cat-descricao" class="form-control"></div>
-        <div class="col-md-2"><button class="btn btn-tm-primary w-100"><i class="bi bi-plus"></i> Adicionar</button></div>
-      </form>
-    </div>
-    <div class="card p-4">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h6 class="fw-bold mb-0">Serviços cadastrados</h6>
-        <span class="text-muted small">${data.servicos.length} serviço(s)</span>
-      </div>
-      ${catalogoHtml}
-    </div>`;
-
-  document.getElementById('form-add-catalogo').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
-      await api('/admin/catalogo', { method: 'POST', body: {
-        nome: document.getElementById('cat-nome').value.trim(),
-        categoria: document.getElementById('cat-categoria').value.trim(),
-        descricao: document.getElementById('cat-descricao').value.trim()
-      }});
-      showToast('Serviço adicionado!', 'success');
-      await renderAdminCatalogo(el);
-    } catch (err) { showToast(err.error || 'Erro', 'error'); }
-  });
-}
-
-async function editarServicoCatalogo(id, nome, categoria, descricao, ativo) {
-  const novoNome = prompt('Nome do serviço:', nome);
-  if (!novoNome) return;
-  const novaCat = prompt('Categoria:', categoria);
-  if (!novaCat) return;
-  const novaDesc = prompt('Descrição:', descricao);
-  const novoAtivo = confirm('Serviço ativo?') ? 1 : 0;
-  try {
-    await api(`/admin/catalogo/${id}`, { method: 'PUT', body: { nome: novoNome, categoria: novaCat, descricao: novaDesc || '', ativo: novoAtivo } });
-    showToast('Catálogo atualizado!', 'success');
-    await renderAdminCatalogo(document.getElementById('app-content'));
-  } catch (err) { showToast(err.error || 'Erro', 'error'); }
-}
-
-async function excluirServicoCatalogo(id) {
-  if (!confirm('Remover este serviço do catálogo? Oficinas que o utilizam perderão a referência.')) return;
-  try {
-    await api(`/admin/catalogo/${id}`, { method: 'DELETE' });
-    showToast('Serviço removido.', 'info');
-    await renderAdminCatalogo(document.getElementById('app-content'));
-  } catch (err) { showToast(err.error || 'Erro', 'error'); }
 }
 
 // ─── RANKING DE OFICINAS ────────────────────────────

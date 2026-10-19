@@ -9,6 +9,7 @@ import multer from 'multer';
 
 import db from '../config/database';
 import { gerarToken, autenticar, AuthRequest } from '../middleware/auth';
+import { cpfValido, cnpjValido, normalizarCpf, normalizarCnpj } from '../utils/documentos';
 
 const router = Router();
 
@@ -124,11 +125,9 @@ router.post('/cadastro', async (req: Request, res: Response) => {
     if (!aceite && aceite !== 'true' && aceite !== true) erros.push('Você precisa aceitar os Termos de Uso.');
 
     if (tipo === 'cliente') {
-      const cpfLimpo = (cpf || '').replace(/\D/g, '');
-      if (cpfLimpo.length !== 11) erros.push('CPF inválido (deve ter 11 dígitos).');
+      if (typeof cpf !== 'string' || !cpfValido(cpf)) erros.push('CPF inválido.');
     } else if (tipo === 'oficina') {
-      const cnpjLimpo = (cnpj || '').replace(/\D/g, '');
-      if (cnpjLimpo.length !== 14) erros.push('CNPJ inválido (deve ter 14 dígitos).');
+      if (typeof cnpj !== 'string' || !cnpjValido(cnpj)) erros.push('CNPJ inválido.');
       if (!nome_fantasia) erros.push('Nome fantasia obrigatório.');
     } else {
       erros.push('Tipo de cadastro inválido.');
@@ -155,15 +154,13 @@ router.post('/cadastro', async (req: Request, res: Response) => {
       const uid = result.lastInsertRowid as number;
 
       if (tipo === 'cliente') {
-        const cpfLimpo = (cpf || '').replace(/\D/g, '');
-        const cpfFmt = cpfLimpo.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-        db.prepare('INSERT INTO clientes (usuario_id, cpf) VALUES (?, ?)').run(uid, cpfFmt);
+        db.prepare('INSERT INTO clientes (usuario_id, cpf) VALUES (?, ?)').run(uid, normalizarCpf(cpf));
       } else {
         db.prepare(
           'INSERT INTO oficinas (usuario_id, cnpj, nome_fantasia, razao_social, logradouro, numero, bairro, cidade, uf, cep, status_aprovacao) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           uid,
-          cnpj,
+          normalizarCnpj(cnpj),
           nome_fantasia,
           razao_social || '',
           logradouro || '',
