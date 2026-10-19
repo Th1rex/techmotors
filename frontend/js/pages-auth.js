@@ -98,11 +98,13 @@ function renderCadastro(el, params) {
               </div>
               <div class="col-md-6" id="campo-cpf-wrap" ${tipo === 'oficina' ? 'style="display:none"' : ''}>
                 <label class="form-label">CPF *</label>
-                <input id="cad-cpf" class="form-control" placeholder="000.000.000-00">
+                <input id="cad-cpf" class="form-control" placeholder="000.000.000-00" inputmode="numeric" maxlength="14" aria-describedby="cad-cpf-feedback">
+                <div id="cad-cpf-feedback" class="invalid-feedback">Informe um CPF válido.</div>
               </div>
               <div class="col-md-6" id="campo-cnpj-wrap" ${tipo !== 'oficina' ? 'style="display:none"' : ''}>
                 <label class="form-label">CNPJ *</label>
-                <input id="cad-cnpj" class="form-control" placeholder="00.000.000/0001-00">
+                <input id="cad-cnpj" class="form-control" placeholder="00.000.000/0001-00" inputmode="text" maxlength="18" aria-describedby="cad-cnpj-feedback">
+                <div id="cad-cnpj-feedback" class="invalid-feedback">Informe um CNPJ válido.</div>
               </div>
               <div class="col-12" id="campos-pj" ${tipo !== 'oficina' ? 'style="display:none"' : ''}>
                 <div class="row g-3">
@@ -144,13 +146,22 @@ function renderCadastro(el, params) {
       </div>
     </div>`;
 
+  const campoCpf = document.getElementById('cad-cpf');
+  const campoCnpj = document.getElementById('cad-cnpj');
+  campoCpf.addEventListener('input', () => {
+    campoCpf.value = formatarCpfCadastro(campoCpf.value);
+    if (campoCpf.classList.contains('is-invalid')) validarDocumentoCadastro(campoCpf, validarCpfCadastro);
+  });
+  campoCnpj.addEventListener('input', () => {
+    campoCnpj.value = formatarCnpjCadastro(campoCnpj.value);
+    if (campoCnpj.classList.contains('is-invalid')) validarDocumentoCadastro(campoCnpj, validarCnpjCadastro);
+  });
+  campoCpf.addEventListener('blur', () => validarDocumentoCadastro(campoCpf, validarCpfCadastro));
+  campoCnpj.addEventListener('blur', () => validarDocumentoCadastro(campoCnpj, validarCnpjCadastro));
+
   document.getElementById('form-cadastro').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = document.querySelector('#form-cadastro button[type="submit"]');
-    if (btn) {
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Criando conta...';
-    }
 
     const errosDiv = document.getElementById('erros-cadastro');
     errosDiv.innerHTML = '';
@@ -174,11 +185,13 @@ function renderCadastro(el, params) {
     if (!body.aceite) errosLocal.push('Aceite os termos de uso.');
 
     if (tipo === 'cliente') {
-      body.cpf = document.getElementById('cad-cpf').value.trim();
-      const cpfDigits = body.cpf.replace(/\D/g, '');
-      if (cpfDigits.length !== 11) errosLocal.push('CPF deve ter 11 dígitos.');
+      body.cpf = campoCpf.value.trim();
+      if (!validarCpfCadastro(body.cpf)) {
+        errosLocal.push('Informe um CPF válido.');
+        validarDocumentoCadastro(campoCpf, validarCpfCadastro, true);
+      }
     } else {
-      body.cnpj = document.getElementById('cad-cnpj').value.trim();
+      body.cnpj = campoCnpj.value.trim();
       body.nome_fantasia = document.getElementById('cad-nome-fantasia').value.trim();
       body.razao_social = document.getElementById('cad-razao-social').value.trim();
       body.logradouro = document.getElementById('cad-logradouro').value.trim();
@@ -187,14 +200,21 @@ function renderCadastro(el, params) {
       body.cidade = document.getElementById('cad-cidade').value.trim();
       body.uf = document.getElementById('cad-uf').value.trim();
       body.cep = document.getElementById('cad-cep').value.trim();
-      const cnpjDigits = body.cnpj.replace(/\D/g, '');
-      if (cnpjDigits.length !== 14) errosLocal.push('CNPJ deve ter 14 dígitos.');
+      if (!validarCnpjCadastro(body.cnpj)) {
+        errosLocal.push('Informe um CNPJ válido.');
+        validarDocumentoCadastro(campoCnpj, validarCnpjCadastro, true);
+      }
       if (!body.nome_fantasia) errosLocal.push('Nome fantasia é obrigatório.');
     }
 
     if (errosLocal.length > 0) {
       errosDiv.innerHTML = errosLocal.map(e => `<div class="alert alert-danger py-2">${escapeHtml(e)}</div>`).join('');
       return;
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Criando conta...';
     }
 
     try {
@@ -218,6 +238,59 @@ function renderCadastro(el, params) {
       }
     }
   });
+}
+
+function validarCpfCadastro(valor) {
+  const cpf = valor.replace(/\D/g, '');
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+  const calcularDigito = (base, pesos) => {
+    const resto = [...base].reduce((soma, digito, indice) => soma + Number(digito) * pesos[indice], 0) % 11;
+    return resto < 2 ? 0 : 11 - resto;
+  };
+  return calcularDigito(cpf.slice(0, 9), [10, 9, 8, 7, 6, 5, 4, 3, 2]) === Number(cpf[9]) &&
+    calcularDigito(cpf.slice(0, 10), [11, 10, 9, 8, 7, 6, 5, 4, 3, 2]) === Number(cpf[10]);
+}
+
+function valorCaractereCnpjCadastro(caractere) {
+  return caractere.charCodeAt(0) - 48;
+}
+
+function calcularDigitoCnpjCadastro(base) {
+  let peso = 2;
+  let soma = 0;
+  for (let indice = base.length - 1; indice >= 0; indice--) {
+    soma += valorCaractereCnpjCadastro(base[indice]) * peso;
+    peso = peso === 9 ? 2 : peso + 1;
+  }
+  const resto = soma % 11;
+  return resto < 2 ? 0 : 11 - resto;
+}
+
+function validarCnpjCadastro(valor) {
+  const cnpj = valor.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (!/^[A-Z0-9]{12}\d{2}$/.test(cnpj) || /^(\d)\1{13}$/.test(cnpj)) return false;
+  return calcularDigitoCnpjCadastro(cnpj.slice(0, 12)) === Number(cnpj[12]) &&
+    calcularDigitoCnpjCadastro(cnpj.slice(0, 13)) === Number(cnpj[13]);
+}
+
+function formatarCpfCadastro(valor) {
+  const cpf = valor.replace(/\D/g, '').slice(0, 11);
+  return cpf.replace(/^(\d{3})(\d)/, '$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+}
+
+function formatarCnpjCadastro(valor) {
+  const cnpj = valor.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 14);
+  return cnpj.replace(/^(.{2})(.)/, '$1.$2').replace(/^(.{2})\.(.{3})(.)/, '$1.$2.$3')
+    .replace(/^(.{2})\.(.{3})\.(.{3})(.)/, '$1.$2.$3/$4').replace(/(.{4})(.{1,2})$/, '$1-$2');
+}
+
+function validarDocumentoCadastro(input, validar, mostrarVazio = false) {
+  const valido = validar(input.value);
+  const temValor = input.value.replace(/[^a-zA-Z0-9]/g, '').length > 0;
+  const invalido = !valido && (temValor || mostrarVazio);
+  input.classList.toggle('is-invalid', invalido);
+  input.classList.toggle('is-valid', valido);
+  return valido;
 }
 
 function alternarTipoCad(tipo) {

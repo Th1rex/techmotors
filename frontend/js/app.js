@@ -1,5 +1,6 @@
 // TechMotors SPA Router
 let currentPage = '';
+let oficinaStatusAprovacao = null;
 
 function navegarPara(page, params = {}) {
   const hash = page + (Object.keys(params).length ? '?' + new URLSearchParams(params).toString() : '');
@@ -31,20 +32,20 @@ function renderNavbar() {
         <li class="nav-item"><a class="nav-link" href="#cliente-veiculos"><i class="bi bi-car-front"></i> Veículos</a></li>
         <li class="nav-item"><a class="nav-link position-relative" href="#cliente-notificacoes"><i class="bi bi-bell"></i> <span id="notif-badge" class="d-none badge bg-danger position-absolute" style="top:2px;right:2px;font-size:.6rem;padding:2px 5px">0</span></a></li>`;
     } else if (user.tipo === 'oficina') {
-      links = `
+      links = oficinaStatusAprovacao === 'aprovada' ? `
         <li class="nav-item"><a class="nav-link" href="#oficina-agenda"><i class="bi bi-calendar-week"></i> Agenda</a></li>
         <li class="nav-item"><a class="nav-link" href="#oficina-solicitacoes"><i class="bi bi-inbox"></i> Solicitações</a></li>
         <li class="nav-item"><a class="nav-link" href="#oficina-disponibilidade"><i class="bi bi-clock"></i> Disponibilidade</a></li>
         <li class="nav-item"><a class="nav-link" href="#oficina-bloqueios"><i class="bi bi-ban"></i> Bloqueios</a></li>
         <li class="nav-item"><a class="nav-link" href="#oficina-servicos"><i class="bi bi-tools"></i> Serviços</a></li>
         <li class="nav-item"><a class="nav-link" href="#oficina-metricas"><i class="bi bi-graph-up"></i> Métricas</a></li>
-        <li class="nav-item"><a class="nav-link position-relative" href="#oficina-notificacoes"><i class="bi bi-bell"></i> <span id="notif-badge-ofi" class="d-none badge bg-danger position-absolute" style="top:2px;right:2px;font-size:.6rem;padding:2px 5px">0</span></a></li>`;
+        <li class="nav-item"><a class="nav-link position-relative" href="#oficina-notificacoes"><i class="bi bi-bell"></i> <span id="notif-badge-ofi" class="d-none badge bg-danger position-absolute" style="top:2px;right:2px;font-size:.6rem;padding:2px 5px">0</span></a></li>` : `
+        <li class="nav-item"><a class="nav-link" href="#oficina-aguardando"><i class="bi bi-hourglass-split"></i> Aprovação</a></li>`;
     } else if (user.tipo === 'admin') {
       links = `
         <li class="nav-item"><a class="nav-link" href="#admin-dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
         <li class="nav-item"><a class="nav-link" href="#admin-pendentes"><i class="bi bi-hourglass-split"></i> Aprovações</a></li>
         <li class="nav-item"><a class="nav-link" href="#admin-usuarios"><i class="bi bi-people"></i> Usuários</a></li>
-        <li class="nav-item"><a class="nav-link" href="#admin-catalogo"><i class="bi bi-journal-text"></i> Catálogo</a></li>
         <li class="nav-item"><a class="nav-link" href="#admin-ranking"><i class="bi bi-trophy"></i> Ranking</a></li>
         <li class="nav-item"><a class="nav-link" href="#admin-avaliacoes"><i class="bi bi-chat-square-quote"></i> Avaliações</a></li>
         <li class="nav-item"><a class="nav-link position-relative" href="#admin-notificacoes"><i class="bi bi-bell"></i> <span id="notif-badge-admin" class="d-none badge bg-danger position-absolute" style="top:2px;right:2px;font-size:.6rem;padding:2px 5px">0</span></a></li>`;
@@ -57,8 +58,8 @@ function renderNavbar() {
             : `<i class="bi bi-person-circle"></i>`} ${escapeHtml(user.nome)}
         </a>
         <ul class="dropdown-menu dropdown-menu-end">
-          <li><a class="dropdown-item" href="#perfil"><i class="bi bi-person-gear"></i> Meu Perfil</a></li>
-          <li><hr class="dropdown-divider"></li>
+          ${user.tipo !== 'oficina' || oficinaStatusAprovacao === 'aprovada' ? '<li><a class="dropdown-item" href="#perfil"><i class="bi bi-person-gear"></i> Meu Perfil</a></li>' : ''}
+          ${user.tipo !== 'oficina' || oficinaStatusAprovacao === 'aprovada' ? '<li><hr class="dropdown-divider"></li>' : ''}
           <li class="px-3 py-2">
             <div class="small text-muted mb-1 fw-medium">Tema</div>
             <div class="btn-group btn-group-sm w-100" role="group">
@@ -137,7 +138,7 @@ function renderNavbar() {
     checkNotifBadge();
   }
   if (user && user.tipo === 'oficina') {
-    checkNotifBadgeOficina();
+    if (oficinaStatusAprovacao === 'aprovada') checkNotifBadgeOficina();
   }
   if (user && user.tipo === 'admin') {
     checkNotifBadgeAdmin();
@@ -162,10 +163,28 @@ async function handleRoute() {
   const content = document.getElementById('app-content');
   const user = getUser();
 
+  if (user && user.tipo === 'oficina') {
+    oficinaStatusAprovacao = null;
+    try {
+      const data = await api('/oficina/status');
+      oficinaStatusAprovacao = data.oficina?.status_aprovacao || 'pendente';
+    } catch (err) {
+      if (err.status === 401) return;
+      content.innerHTML = `<div class="alert alert-danger">${escapeHtml(err.error || 'Não foi possível verificar a aprovação da oficina.')}</div>`;
+      renderNavbar();
+      return;
+    }
+    if (oficinaStatusAprovacao !== 'aprovada' && page !== 'oficina-aguardando') {
+      renderNavbar();
+      navegarPara('oficina-aguardando');
+      return;
+    }
+  }
+
   // Redirect if logged in and going to home
   if (!page && user) {
     if (user.tipo === 'cliente') { navegarPara('cliente-home'); return; }
-    if (user.tipo === 'oficina') { navegarPara('oficina-agenda'); return; }
+    if (user.tipo === 'oficina') { navegarPara(oficinaStatusAprovacao === 'aprovada' ? 'oficina-agenda' : 'oficina-aguardando'); return; }
     if (user.tipo === 'admin') { navegarPara('admin-dashboard'); return; }
   }
 
@@ -207,7 +226,6 @@ async function handleRoute() {
       case 'admin-oficina': await renderAdminOficina(content, params); break;
       case 'admin-usuarios': await renderAdminUsuarios(content, params); break;
       case 'admin-usuario': await renderAdminUsuarioDetalhe(content, params); break;
-      case 'admin-catalogo': await renderAdminCatalogo(content); break;
       case 'admin-ranking': await renderAdminRanking(content); break;
       case 'admin-avaliacoes': await renderAdminAvaliacoes(content); break;
       case 'admin-notificacoes': await renderAdminNotificacoes(content); break;

@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 
 import db from '../config/database';
 import { autenticar, exigirTipo, AuthRequest } from '../middleware/auth';
+import { gerarCsv, CsvValue } from '../utils/csv';
 
 const router = Router();
 router.use(autenticar, exigirTipo('oficina'));
@@ -11,6 +12,27 @@ router.get('/status', (req: AuthRequest, res: Response) => {
   try {
     const oficina = db.prepare('SELECT * FROM oficinas WHERE usuario_id=?').get(req.user!.id);
     res.json({ oficina: oficina || null });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.use((req: AuthRequest, res: Response, next) => {
+  try {
+    const oficina = db
+      .prepare('SELECT status_aprovacao, motivo_rejeicao FROM oficinas WHERE usuario_id=?')
+      .get(req.user!.id) as { status_aprovacao: string; motivo_rejeicao: string | null } | undefined;
+
+    if (!oficina || oficina.status_aprovacao !== 'aprovada') {
+      res.status(403).json({
+        error: 'Sua oficina precisa ser aprovada pelo administrador para acessar este recurso.',
+        status_aprovacao: oficina?.status_aprovacao || 'pendente',
+        motivo_rejeicao: oficina?.motivo_rejeicao || null,
+      });
+      return;
+    }
+
+    next();
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -233,12 +255,22 @@ router.get('/servicos', (req: AuthRequest, res: Response) => {
   try {
     const meus = db
       .prepare(
-        `SELECT os.*, cs.nome AS servico_nome, cs.categoria FROM oficina_servicos os
-       JOIN catalogo_servicos cs ON cs.id=os.servico_id WHERE os.oficina_id=?`
+        `SELECT os.*, cs.nome AS servico_nome, cs.categoria, cs.descricao
+         FROM oficina_servicos os
+         JOIN catalogo_servicos cs ON cs.id=os.servico_id
+         WHERE os.oficina_id=?
+         ORDER BY cs.categoria, cs.nome`
       )
       .all(req.user!.id);
-    const catalogo = db.prepare('SELECT * FROM catalogo_servicos WHERE ativo=1 ORDER BY categoria, nome').all();
-    res.json({ meus_servicos: meus, catalogo });
+    const categorias = db
+      .prepare(
+        `SELECT DISTINCT cs.categoria FROM oficina_servicos os
+         JOIN catalogo_servicos cs ON cs.id=os.servico_id
+         WHERE os.oficina_id=? AND cs.categoria IS NOT NULL
+         ORDER BY cs.categoria`
+      )
+      .all(req.user!.id);
+    res.json({ meus_servicos: meus, categorias });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -247,22 +279,208 @@ router.get('/servicos', (req: AuthRequest, res: Response) => {
 // POST /api/oficina/servicos
 router.post('/servicos', (req: AuthRequest, res: Response) => {
   try {
-    const { servico_id, preco_modalidade, preco, duracao } = req.body;
-    db.prepare(
-      'INSERT INTO oficina_servicos (oficina_id, servico_id, preco_modalidade, preco, duracao_minutos) VALUES (?, ?, ?, ?, ?)'
-    ).run(req.user!.id, servico_id, preco_modalidade, preco || null, duracao || 60);
-    res.json({ message: 'Serviço adicionado.' });
+    const { nome, categoria, descricao, preco_modalidade, preco, duracao } = req.body;
+    const validationError = validarServicoOficina({ nome, categoria, preco_modalidade, preco, duracao });
+    if (validationError) {
+      res.status(400).json({ error: validationError });
+      return;
+    }
+
+    const transaction = db.transaction(() => {
+      const service = db
+        .prepare('INSERT INTO catalogo_servicos (nome, categoria, descricao) VALUES (?, ?, ?)')
+        .run(nome.trim(), categoria.trim(), typeof descricao === 'string' ? descricao.trim() : '');
+      db.prepare(
+        'INSERT INTO oficina_servicos (oficina_id, servico_id, preco_modalidade, preco, duracao_minutos) VALUES (?, ?, ?, ?, ?)'
+      ).run(
+        req.user!.id,
+        service.lastInsertRowid,
+        preco_modalidade,
+        preco_modalidade === 'orcamento' ? null : Number(preco),
+        Number(duracao)
+      );
+    });
+    transaction();
+    res.status(201).json({ message: 'Serviço adicionado.' });
   } catch (err: any) {
-    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') res.status(400).json({ error: 'Serviço já adicionado.' });
-    else res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/oficina/servicos/:id
+router.put('/servicos/:id', (req: AuthRequest, res: Response) => {
+  try {
+    const { nome, categoria, descricao, preco_modalidade, preco, duracao } = req.body;
+    const validationError = validarServicoOficina({ nome, categoria, preco_modalidade, preco, duracao });
+    if (validationError) {
+      res.status(400).json({ error: validationError });
+      return;
+    }
+
+    const id = Number(req.params.id);
+    const offering = db
+      .prepare('SELECT servico_id FROM oficina_servicos WHERE id=? AND oficina_id=?')
+      .get(id, req.user!.id) as { servico_id: number } | undefined;
+    if (!offering) {
+      res.status(404).json({ error: 'Serviço não encontrado.' });
+      return;
+    }
+
+    const transaction = db.transaction(() => {
+      db.prepare('UPDATE catalogo_servicos SET nome=?, categoria=?, descricao=? WHERE id=?').run(
+        nome.trim(),
+        categoria.trim(),
+        typeof descricao === 'string' ? descricao.trim() : '',
+        offering.servico_id
+      );
+      db.prepare(
+        'UPDATE oficina_servicos SET preco_modalidade=?, preco=?, duracao_minutos=? WHERE id=? AND oficina_id=?'
+      ).run(
+        preco_modalidade,
+        preco_modalidade === 'orcamento' ? null : Number(preco),
+        Number(duracao),
+        id,
+        req.user!.id
+      );
+    });
+    transaction();
+    res.json({ message: 'Serviço atualizado.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 // DELETE /api/oficina/servicos/:id
 router.delete('/servicos/:id', (req: AuthRequest, res: Response) => {
   try {
-    db.prepare('DELETE FROM oficina_servicos WHERE id=? AND oficina_id=?').run(parseInt(req.params.id), req.user!.id);
+    const result = db
+      .prepare('DELETE FROM oficina_servicos WHERE id=? AND oficina_id=?')
+      .run(parseInt(req.params.id), req.user!.id);
+    if (!result.changes) {
+      res.status(404).json({ error: 'Serviço não encontrado.' });
+      return;
+    }
     res.json({ message: 'Serviço removido.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function validarServicoOficina(servico: {
+  nome?: unknown;
+  categoria?: unknown;
+  preco_modalidade?: unknown;
+  preco?: unknown;
+  duracao?: unknown;
+}): string | null {
+  if (typeof servico.nome !== 'string' || !servico.nome.trim()) return 'Nome do serviço é obrigatório.';
+  if (servico.nome.trim().length > 100) return 'O nome deve ter no máximo 100 caracteres.';
+  if (typeof servico.categoria !== 'string' || !servico.categoria.trim()) return 'Categoria é obrigatória.';
+  if (servico.categoria.trim().length > 80) return 'A categoria deve ter no máximo 80 caracteres.';
+  if (!['fixo', 'a_partir_de', 'orcamento'].includes(servico.preco_modalidade as string)) {
+    return 'Modalidade de preço inválida.';
+  }
+  if (servico.preco_modalidade !== 'orcamento') {
+    const preco = Number(servico.preco);
+    if (servico.preco === '' || servico.preco == null || !Number.isFinite(preco) || preco < 0) {
+      return 'Informe um preço válido para este serviço.';
+    }
+  }
+  const duracao = Number(servico.duracao);
+  if (!Number.isInteger(duracao) || duracao < 1 || duracao > 1440) {
+    return 'A duração deve ser um número entre 1 e 1440 minutos.';
+  }
+  return null;
+}
+
+// GET /api/oficina/metricas/exportar
+router.get('/metricas/exportar', (req: AuthRequest, res: Response) => {
+  try {
+    const oficinaId = req.user!.id;
+    const totals = db
+      .prepare(
+        `SELECT COUNT(*) AS total_agendamentos,
+           SUM(CASE WHEN status='solicitado' THEN 1 ELSE 0 END) AS solicitados,
+           SUM(CASE WHEN status='confirmado' THEN 1 ELSE 0 END) AS confirmados,
+           SUM(CASE WHEN status='concluido' THEN 1 ELSE 0 END) AS concluidos,
+           SUM(CASE WHEN status='cancelado' THEN 1 ELSE 0 END) AS cancelados,
+           SUM(CASE WHEN status='recusado' THEN 1 ELSE 0 END) AS recusados,
+           COALESCE(SUM(CASE WHEN status='concluido' THEN valor_estimado ELSE 0 END),0) AS receita_total,
+           COALESCE(SUM(CASE WHEN status='concluido' AND substr(data_hora,1,7)=? THEN valor_estimado ELSE 0 END),0) AS receita_mes,
+           SUM(CASE WHEN substr(data_hora,1,7)=? THEN 1 ELSE 0 END) AS agendamentos_mes
+         FROM agendamentos WHERE oficina_id=?`
+      )
+      .get(new Date().toISOString().substring(0, 7), new Date().toISOString().substring(0, 7), oficinaId) as Record<
+      string,
+      number | null
+    >;
+    const workshop = db
+      .prepare('SELECT nota_media, total_avaliacoes FROM oficinas WHERE usuario_id=?')
+      .get(oficinaId) as { nota_media: number; total_avaliacoes: number };
+    const rows: CsvValue[][] = [
+      ['Indicador', 'Valor', '', '', '', '', ''],
+      ['Agendamentos totais', totals.total_agendamentos, '', '', '', '', ''],
+      ['Solicitados', totals.solicitados, '', '', '', '', ''],
+      ['Confirmados', totals.confirmados, '', '', '', '', ''],
+      ['Concluídos', totals.concluidos, '', '', '', '', ''],
+      ['Cancelados', totals.cancelados, '', '', '', '', ''],
+      ['Recusados', totals.recusados, '', '', '', '', ''],
+      ['Receita total concluída (R$)', totals.receita_total, '', '', '', '', ''],
+      ['Receita do mês (R$)', totals.receita_mes, '', '', '', '', ''],
+      ['Agendamentos do mês', totals.agendamentos_mes, '', '', '', '', ''],
+      ['Nota média', workshop.nota_media, '', '', '', '', ''],
+      ['Total de avaliações', workshop.total_avaliacoes, '', '', '', '', ''],
+      ['', '', '', '', '', '', ''],
+    ];
+
+    const history = db
+      .prepare(
+        `SELECT a.data_hora, u.nome AS cliente, u.telefone AS telefone_cliente,
+           cs.nome AS servico, v.placa, v.marca, v.modelo, a.valor_estimado,
+           av.qtd_estrelas AS avaliacao, av.comentario AS comentario_avaliacao
+         FROM agendamentos a
+         JOIN usuarios u ON u.id=a.cliente_id
+         JOIN catalogo_servicos cs ON cs.id=a.servico_id
+         JOIN veiculos v ON v.id=a.veiculo_id
+         LEFT JOIN avaliacoes av ON av.agendamento_id=a.id
+         WHERE a.oficina_id=? AND a.status='concluido'
+         ORDER BY a.data_hora DESC`
+      )
+      .all(oficinaId) as Array<{
+      data_hora: string;
+      cliente: string;
+      telefone_cliente: string | null;
+      servico: string;
+      placa: string;
+      marca: string | null;
+      modelo: string | null;
+      valor_estimado: number | null;
+      avaliacao: number | null;
+      comentario_avaliacao: string | null;
+    }>;
+    rows.push(['Histórico de atendimentos concluídos', '', '', '', '', '', '']);
+    for (const appointment of history) {
+      rows.push([
+        appointment.data_hora,
+        appointment.cliente,
+        appointment.telefone_cliente,
+        appointment.servico,
+        appointment.placa,
+        `${appointment.marca || ''} ${appointment.modelo || ''}`.trim(),
+        appointment.valor_estimado,
+      ]);
+      rows.push(['Avaliação', appointment.avaliacao, appointment.comentario_avaliacao, '', '', '', '']);
+    }
+
+    const csv = gerarCsv(
+      ['Indicador / Data', 'Valor / Cliente', 'Telefone / Comentário', 'Serviço', 'Placa', 'Veículo', 'Valor (R$)'],
+      rows
+    );
+    res
+      .status(200)
+      .setHeader('Content-Type', 'text/csv; charset=utf-8')
+      .setHeader('Content-Disposition', 'attachment; filename="techmotors-metricas-oficina.csv"')
+      .send(`\uFEFF${csv}`);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

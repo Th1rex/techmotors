@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
+import db from '../config/database';
+
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   throw new Error('JWT_SECRET não definido. Configure a variável de ambiente antes de iniciar o servidor.');
@@ -33,6 +35,15 @@ export function autenticar(req: AuthRequest, res: Response, next: NextFunction):
   }
   try {
     const decoded = jwt.verify(token, SECRET) as unknown as AuthUser;
+    const user = db.prepare('SELECT status FROM usuarios WHERE id=?').get(decoded.id) as { status: string } | undefined;
+    if (!user) {
+      res.status(401).json({ error: 'Conta não encontrada.' });
+      return;
+    }
+    if (user.status === 'bloqueado') {
+      res.status(403).json({ error: 'Sua conta está bloqueada.' });
+      return;
+    }
     req.user = decoded;
     next();
   } catch {

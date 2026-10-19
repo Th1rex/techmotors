@@ -24,8 +24,8 @@ A segurança da plataforma TechMotors foi projetada em múltiplas camadas, abran
 |--------|-----------|-----------|
 | **Middleware de tipo** | `exigirTipo('cliente'/'oficina'/'admin')` | Rotas acessíveis apenas pelo tipo correto de usuário |
 | **Isolamento de dados** | WHERE `usuario_id=?` em todas as queries | Cliente só acessa seus dados; oficina só acessa os dela |
-| **Aprovação administrativa** | Oficinas precisam de aprovação do admin | Impede oficinas falsas na plataforma |
-| **Status de conta** | Contas podem ser bloqueadas pelo admin | Controle sobre usuários problemáticos |
+| **Aprovação administrativa** | Oficinas pendentes/rejeitadas só podem consultar o próprio status; as demais rotas exigem aprovação | Restringe o acesso às ferramentas da oficina até a aprovação do admin |
+| **Status de conta** | Contas inativas podem entrar, mas oficinas inativas não são exibidas nem aceitam novos agendamentos; contas bloqueadas não entram e sessões existentes são invalidadas | Controle de acesso e visibilidade aplicado também no servidor |
 
 ### Matriz de Acesso
 

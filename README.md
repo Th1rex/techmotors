@@ -178,7 +178,7 @@
 ### Instalação
 
 ```bash
-git clone <url-do-repositorio>
+git clone <https://github.com/Eduardosnt/techmotors.git>
 cd techmotors/backend
 npm install
 ```

@@ -2,9 +2,146 @@ import { Router, Response } from 'express';
 
 import db from '../config/database';
 import { autenticar, exigirTipo, AuthRequest } from '../middleware/auth';
+import { gerarCsv, CsvValue } from '../utils/csv';
 
 const router = Router();
 router.use(autenticar, exigirTipo('admin'));
+
+// GET /api/admin/metricas/exportar
+router.get('/metricas/exportar', (req: AuthRequest, res: Response) => {
+  try {
+    const totals = db
+      .prepare(
+        `SELECT
+           (SELECT COUNT(*) FROM usuarios WHERE tipo='cliente') AS total_clientes,
+           (SELECT COUNT(*) FROM oficinas WHERE status_aprovacao='aprovada') AS total_oficinas,
+           (SELECT COUNT(*) FROM oficinas WHERE status_aprovacao='pendente') AS pendentes,
+           (SELECT COUNT(*) FROM agendamentos) AS total_agendamentos,
+           (SELECT COUNT(*) FROM agendamentos WHERE status='concluido') AS concluidos,
+           (SELECT COUNT(*) FROM avaliacoes WHERE ocultada=0) AS total_avaliacoes,
+           (SELECT COALESCE(SUM(valor_estimado),0) FROM agendamentos WHERE status='concluido') AS receita_total`
+      )
+      .get() as Record<string, number>;
+    const taxaConclusao =
+      totals.total_agendamentos > 0 ? Math.round((totals.concluidos / totals.total_agendamentos) * 100) : 0;
+    const rows: CsvValue[][] = [
+      ['Indicador', 'Valor', '', '', '', '', '', ''],
+      ['Clientes', totals.total_clientes, '', '', '', '', '', ''],
+      ['Oficinas aprovadas', totals.total_oficinas, '', '', '', '', '', ''],
+      ['Oficinas pendentes', totals.pendentes, '', '', '', '', '', ''],
+      ['Agendamentos', totals.total_agendamentos, '', '', '', '', '', ''],
+      ['Agendamentos concluídos', totals.concluidos, '', '', '', '', '', ''],
+      ['Taxa de conclusão (%)', taxaConclusao, '', '', '', '', '', ''],
+      ['Avaliações visíveis', totals.total_avaliacoes, '', '', '', '', '', ''],
+      ['Receita total concluída (R$)', totals.receita_total, '', '', '', '', '', ''],
+      ['', '', '', '', '', '', '', ''],
+    ];
+
+    const monthly = db
+      .prepare(
+        `SELECT substr(data_hora,1,7) AS mes, COUNT(*) AS total,
+           SUM(CASE WHEN status='concluido' THEN 1 ELSE 0 END) AS concluidos,
+           COALESCE(SUM(CASE WHEN status='concluido' THEN valor_estimado ELSE 0 END),0) AS receita
+         FROM agendamentos
+         GROUP BY substr(data_hora,1,7)
+         ORDER BY mes`
+      )
+      .all() as Array<{ mes: string; total: number; concluidos: number; receita: number }>;
+    rows.push(['Resumo mensal', '', '', '', '', '', '', '']);
+    for (const month of monthly) {
+      rows.push([month.mes, month.total, month.concluidos, month.receita, '', '', '', '']);
+    }
+
+    const workshops = db
+      .prepare(
+        `SELECT o.nome_fantasia, o.cidade, o.uf, o.nota_media, o.total_avaliacoes,
+           u.status AS status_conta, o.status_aprovacao,
+           COUNT(DISTINCT a.id) AS agendamentos
+         FROM oficinas o
+         JOIN usuarios u ON u.id=o.usuario_id
+         LEFT JOIN agendamentos a ON a.oficina_id=o.usuario_id
+         GROUP BY o.usuario_id
+         ORDER BY o.nota_media DESC, o.total_avaliacoes DESC`
+      )
+      .all() as Array<{
+      nome_fantasia: string;
+      cidade: string | null;
+      uf: string | null;
+      nota_media: number;
+      total_avaliacoes: number;
+      status_conta: string;
+      status_aprovacao: string;
+      agendamentos: number;
+    }>;
+    rows.push(['Oficinas', '', '', '', '', '', '', '']);
+    for (const workshop of workshops) {
+      rows.push([
+        workshop.nome_fantasia,
+        workshop.cidade,
+        workshop.uf,
+        workshop.nota_media,
+        workshop.total_avaliacoes,
+        workshop.status_conta,
+        workshop.status_aprovacao,
+        workshop.agendamentos,
+      ]);
+    }
+
+    const appointments = db
+      .prepare(
+        `SELECT a.data_hora, u.nome AS cliente, o.nome_fantasia, cs.nome AS servico,
+           a.status, a.duracao_minutos, a.valor_estimado
+         FROM agendamentos a
+         JOIN usuarios u ON u.id=a.cliente_id
+         JOIN oficinas o ON o.usuario_id=a.oficina_id
+         JOIN catalogo_servicos cs ON cs.id=a.servico_id
+         ORDER BY a.data_hora DESC`
+      )
+      .all() as Array<{
+      data_hora: string;
+      cliente: string;
+      nome_fantasia: string;
+      servico: string;
+      status: string;
+      duracao_minutos: number;
+      valor_estimado: number | null;
+    }>;
+    rows.push(['Agendamentos', '', '', '', '', '', '', '']);
+    for (const appointment of appointments) {
+      rows.push([
+        appointment.data_hora,
+        appointment.cliente,
+        appointment.nome_fantasia,
+        appointment.servico,
+        appointment.status,
+        appointment.duracao_minutos,
+        appointment.valor_estimado,
+        '',
+      ]);
+    }
+
+    const csv = gerarCsv(
+      [
+        'Indicador / Data',
+        'Valor / Agendamentos',
+        'Concluídos',
+        'Receita / Nota',
+        'Avaliações',
+        'Status da conta',
+        'Status de aprovação',
+        'Agendamentos',
+      ],
+      rows
+    );
+    res
+      .status(200)
+      .setHeader('Content-Type', 'text/csv; charset=utf-8')
+      .setHeader('Content-Disposition', 'attachment; filename="techmotors-metricas-admin.csv"')
+      .send(`\uFEFF${csv}`);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /api/admin/dashboard
 router.get('/dashboard', (req: AuthRequest, res: Response) => {
@@ -222,66 +359,6 @@ router.get('/usuario/:id', (req: AuthRequest, res: Response) => {
     }
 
     res.json({ user, extra });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── CATÁLOGO DE SERVIÇOS ───────────────────────────
-
-// GET /api/admin/catalogo
-router.get('/catalogo', (req: AuthRequest, res: Response) => {
-  try {
-    const servicos = db.prepare('SELECT * FROM catalogo_servicos ORDER BY categoria, nome').all();
-    res.json({ servicos });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/admin/catalogo
-router.post('/catalogo', (req: AuthRequest, res: Response) => {
-  try {
-    const { nome, categoria, descricao } = req.body;
-    if (!nome || !categoria) {
-      res.status(400).json({ error: 'Nome e categoria são obrigatórios' });
-      return;
-    }
-    db.prepare('INSERT INTO catalogo_servicos (nome, categoria, descricao) VALUES (?, ?, ?)').run(
-      nome,
-      categoria,
-      descricao || ''
-    );
-    res.status(201).json({ message: 'Serviço adicionado ao catálogo!' });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// PUT /api/admin/catalogo/:id
-router.put('/catalogo/:id', (req: AuthRequest, res: Response) => {
-  try {
-    const id = parseInt(req.params.id);
-    const { nome, categoria, descricao, ativo } = req.body;
-    db.prepare('UPDATE catalogo_servicos SET nome=?, categoria=?, descricao=?, ativo=? WHERE id=?').run(
-      nome,
-      categoria,
-      descricao || '',
-      ativo !== undefined ? ativo : 1,
-      id
-    );
-    res.json({ message: 'Catálogo atualizado.' });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE /api/admin/catalogo/:id
-router.delete('/catalogo/:id', (req: AuthRequest, res: Response) => {
-  try {
-    const id = parseInt(req.params.id);
-    db.prepare('DELETE FROM catalogo_servicos WHERE id=?').run(id);
-    res.json({ message: 'Serviço removido do catálogo.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

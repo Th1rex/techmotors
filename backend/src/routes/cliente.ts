@@ -6,10 +6,61 @@ import { autenticar, exigirTipo, AuthRequest } from '../middleware/auth';
 const router = Router();
 router.use(autenticar, exigirTipo('cliente'));
 
+function validarDadosVeiculo(body: any) {
+  const { placa, marca, modelo } = body;
+  if (
+    typeof placa !== 'string' ||
+    typeof marca !== 'string' ||
+    typeof modelo !== 'string' ||
+    !placa.trim() ||
+    !marca.trim() ||
+    !modelo.trim()
+  ) {
+    return { error: 'Placa, marca e modelo são obrigatórios.' };
+  }
+
+  const placaSemSeparadores = placa.replace(/[\s-]/g, '').toUpperCase();
+  const placaValida = /^[A-Z]{3}\d{4}$/.test(placaSemSeparadores) || /^[A-Z]{3}\d[A-Z]\d{2}$/.test(placaSemSeparadores);
+  if (!placaValida) return { error: 'Placa inválida. Use ABC-1234 ou ABC1D23.' };
+
+  const ano = body.ano === '' || body.ano == null ? null : Number(body.ano);
+  if (ano !== null && (!Number.isInteger(ano) || ano < 1980 || ano > 2030)) {
+    return { error: 'Ano inválido. Informe um ano entre 1980 e 2030.' };
+  }
+
+  const tipo = body.tipo || 'carro';
+  if (tipo !== 'carro' && tipo !== 'moto') return { error: 'Tipo de veículo inválido.' };
+
+  const placaNormalizada = /^[A-Z]{3}\d{4}$/.test(placaSemSeparadores)
+    ? `${placaSemSeparadores.slice(0, 3)}-${placaSemSeparadores.slice(3)}`
+    : placaSemSeparadores;
+  return { dados: { placa: placaNormalizada, marca: marca.trim(), modelo: modelo.trim(), ano, tipo } };
+}
+
+function placaJaCadastrada(placa: string, id?: number) {
+  return db
+    .prepare(
+      `SELECT id FROM veiculos
+       WHERE REPLACE(REPLACE(UPPER(placa), '-', ''), ' ', '')=?
+         AND (? IS NULL OR id<>?)
+       LIMIT 1`
+    )
+    .get(placa.replace(/[\s-]/g, '').toUpperCase(), id ?? null, id ?? null);
+}
+
 // GET /api/cliente/home
 router.get('/home', (req: AuthRequest, res: Response) => {
   try {
-    const categorias = db.prepare('SELECT DISTINCT categoria FROM catalogo_servicos WHERE ativo=1').all();
+    const categorias = db
+      .prepare(
+        `SELECT DISTINCT cs.categoria FROM oficina_servicos os
+         JOIN catalogo_servicos cs ON cs.id=os.servico_id
+         JOIN oficinas o ON o.usuario_id=os.oficina_id
+         JOIN usuarios u ON u.id=o.usuario_id
+         WHERE os.ativo=1 AND cs.ativo=1 AND o.status_aprovacao='aprovada' AND u.status='ativo'
+         ORDER BY cs.categoria`
+      )
+      .all();
     const lat = parseFloat(req.query.lat as string);
     const lng = parseFloat(req.query.lng as string);
 
@@ -21,7 +72,7 @@ router.get('/home', (req: AuthRequest, res: Response) => {
           `SELECT o.*, u.nome,
           ((o.latitude - ?) * (o.latitude - ?) + (o.longitude - ?) * (o.longitude - ?)) AS dist
          FROM oficinas o JOIN usuarios u ON u.id=o.usuario_id
-         WHERE o.status_aprovacao='aprovada' AND o.latitude IS NOT NULL
+         WHERE o.status_aprovacao='aprovada' AND u.status='ativo' AND o.latitude IS NOT NULL
          ORDER BY dist ASC LIMIT 6`
         )
         .all(lat, lat, lng, lng);
@@ -29,7 +80,7 @@ router.get('/home', (req: AuthRequest, res: Response) => {
       oficinas = db
         .prepare(
           `SELECT o.*, u.nome FROM oficinas o JOIN usuarios u ON u.id=o.usuario_id
-         WHERE o.status_aprovacao='aprovada' ORDER BY o.nota_media DESC LIMIT 6`
+          WHERE o.status_aprovacao='aprovada' AND u.status='ativo' ORDER BY o.nota_media DESC LIMIT 6`
         )
         .all();
     }
@@ -48,17 +99,21 @@ router.get('/busca', (req: AuthRequest, res: Response) => {
 
     let sql = `SELECT DISTINCT o.*, u.nome, u.telefone FROM oficinas o
                JOIN usuarios u ON u.id=o.usuario_id
-               LEFT JOIN oficina_servicos os ON os.oficina_id=o.usuario_id
-               LEFT JOIN catalogo_servicos cs ON cs.id=os.servico_id
-               WHERE o.status_aprovacao='aprovada'`;
+               LEFT JOIN oficina_servicos os ON os.oficina_id=o.usuario_id AND os.ativo=1
+               LEFT JOIN catalogo_servicos cs ON cs.id=os.servico_id AND cs.ativo=1
+               WHERE o.status_aprovacao='aprovada' AND u.status='ativo'`;
     const params: any[] = [];
     if (q) {
       sql += ' AND (o.nome_fantasia LIKE ? OR cs.nome LIKE ?)';
       params.push(`%${q}%`, `%${q}%`);
     }
     if (categoria) {
-      sql += ' AND cs.categoria=?';
-      params.push(categoria);
+      if (categoria === 'Scanner / Diagnóstico') {
+        sql += " AND cs.categoria IN ('Scanner / Diagnóstico', 'Diagnóstico')";
+      } else {
+        sql += ' AND cs.categoria=?';
+        params.push(categoria);
+      }
     }
     if (cidade) {
       sql += ' AND o.cidade LIKE ?';
@@ -79,13 +134,24 @@ router.get('/busca', (req: AuthRequest, res: Response) => {
 
     // Adicionar serviços de cada oficina
     const stmtServicos = db.prepare(
-      `SELECT cs.nome FROM oficina_servicos os JOIN catalogo_servicos cs ON cs.id=os.servico_id WHERE os.oficina_id=? AND os.ativo=1 LIMIT 3`
+      `SELECT cs.nome FROM oficina_servicos os
+       JOIN catalogo_servicos cs ON cs.id=os.servico_id
+       WHERE os.oficina_id=? AND os.ativo=1 AND cs.ativo=1 LIMIT 3`
     );
     oficinas.forEach((o: any) => {
       o.servicos_preview = (stmtServicos.all(o.usuario_id) as any[]).map((s: any) => s.nome);
     });
 
-    const categorias = db.prepare('SELECT DISTINCT categoria FROM catalogo_servicos WHERE ativo=1').all();
+    const categorias = db
+      .prepare(
+        `SELECT DISTINCT cs.categoria FROM oficina_servicos os
+         JOIN catalogo_servicos cs ON cs.id=os.servico_id
+         JOIN oficinas o ON o.usuario_id=os.oficina_id
+         JOIN usuarios u ON u.id=o.usuario_id
+         WHERE os.ativo=1 AND cs.ativo=1 AND o.status_aprovacao='aprovada' AND u.status='ativo'
+         ORDER BY cs.categoria`
+      )
+      .all();
     res.json({ oficinas, categorias });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -99,7 +165,7 @@ router.get('/oficina/:id', (req: AuthRequest, res: Response) => {
     const oficina = db
       .prepare(
         `SELECT o.*, u.nome, u.telefone FROM oficinas o JOIN usuarios u ON u.id=o.usuario_id
-       WHERE o.usuario_id=? AND o.status_aprovacao='aprovada'`
+       WHERE o.usuario_id=? AND o.status_aprovacao='aprovada' AND u.status='ativo'`
       )
       .get(id) as any;
     if (!oficina) {
@@ -111,7 +177,7 @@ router.get('/oficina/:id', (req: AuthRequest, res: Response) => {
       .prepare(
         `SELECT os.*, cs.nome AS servico_nome, cs.categoria
        FROM oficina_servicos os JOIN catalogo_servicos cs ON cs.id=os.servico_id
-       WHERE os.oficina_id=? AND os.ativo=1`
+       WHERE os.oficina_id=? AND os.ativo=1 AND cs.ativo=1`
       )
       .all(id);
     const disponibilidade = db
@@ -137,6 +203,16 @@ router.get('/oficina/:id', (req: AuthRequest, res: Response) => {
 router.get('/oficina/:id/avaliacoes', (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
+    const oficinaVisivel = db
+      .prepare(
+        `SELECT o.usuario_id FROM oficinas o JOIN usuarios u ON u.id=o.usuario_id
+         WHERE o.usuario_id=? AND o.status_aprovacao='aprovada' AND u.status='ativo'`
+      )
+      .get(id);
+    if (!oficinaVisivel) {
+      res.status(404).json({ error: 'Oficina não encontrada.' });
+      return;
+    }
     const avaliacoes = db
       .prepare(
         `SELECT a.*, u.nome AS cliente_nome FROM avaliacoes a
@@ -156,6 +232,16 @@ router.get('/horarios', (req: AuthRequest, res: Response) => {
     const oficina_id = parseInt(req.query.oficina_id as string);
     const data = req.query.data as string;
     const duracao = parseInt(req.query.duracao as string) || 60;
+    const oficinaVisivel = db
+      .prepare(
+        `SELECT o.usuario_id FROM oficinas o JOIN usuarios u ON u.id=o.usuario_id
+         WHERE o.usuario_id=? AND o.status_aprovacao='aprovada' AND u.status='ativo'`
+      )
+      .get(oficina_id);
+    if (!oficinaVisivel) {
+      res.status(404).json({ error: 'Oficina não encontrada.' });
+      return;
+    }
     const slots = gerarHorariosDisponiveis(oficina_id, data, duracao);
     res.json({ slots });
   } catch (err: any) {
@@ -168,18 +254,37 @@ router.post('/agendar', (req: AuthRequest, res: Response) => {
   try {
     const { oficina_id, servico_ids, data, hora, veiculo_id } = req.body;
     const cliente_id = req.user!.id;
-    if (!oficina_id || !servico_ids?.length || !data || !hora || !veiculo_id) {
+    if (!oficina_id || !Array.isArray(servico_ids) || !servico_ids.length || !data || !hora || !veiculo_id) {
       res.status(400).json({ error: 'Dados incompletos' });
+      return;
+    }
+
+    const oficinaVisivel = db
+      .prepare(
+        `SELECT o.usuario_id FROM oficinas o JOIN usuarios u ON u.id=o.usuario_id
+         WHERE o.usuario_id=? AND o.status_aprovacao='aprovada' AND u.status='ativo'`
+      )
+      .get(oficina_id);
+    if (!oficinaVisivel) {
+      res.status(404).json({ error: 'Oficina não encontrada.' });
       return;
     }
 
     const placeholders = servico_ids.map(() => '?').join(',');
     const totals = db
       .prepare(
-        `SELECT SUM(os.duracao_minutos) as total_dur, SUM(IFNULL(os.preco,0)) as total_preco
-       FROM oficina_servicos os WHERE os.oficina_id=? AND os.servico_id IN (${placeholders})`
+        `SELECT SUM(os.duracao_minutos) as total_dur, SUM(IFNULL(os.preco,0)) as total_preco,
+         COUNT(DISTINCT os.servico_id) as total_servicos
+         FROM oficina_servicos os
+         JOIN catalogo_servicos cs ON cs.id=os.servico_id
+         WHERE os.oficina_id=? AND os.ativo=1 AND cs.ativo=1 AND os.servico_id IN (${placeholders})`
       )
       .get(oficina_id, ...servico_ids) as any;
+
+    if (totals.total_servicos !== new Set(servico_ids.map(Number)).size) {
+      res.status(400).json({ error: 'Um ou mais serviços não estão disponíveis nesta oficina.' });
+      return;
+    }
 
     const dur = totals?.total_dur || 60;
     const preco = totals?.total_preco || null;
@@ -280,22 +385,23 @@ router.get('/veiculos', (req: AuthRequest, res: Response) => {
 // POST /api/cliente/veiculos
 router.post('/veiculos', (req: AuthRequest, res: Response) => {
   try {
-    const { placa, marca, modelo, ano, tipo } = req.body;
-    if (!placa || !marca || !modelo) {
-      res.status(400).json({ error: 'Placa, marca e modelo são obrigatórios' });
+    const resultado = validarDadosVeiculo(req.body);
+    if ('error' in resultado) {
+      res.status(400).json({ error: resultado.error });
+      return;
+    }
+    if (placaJaCadastrada(resultado.dados.placa)) {
+      res.status(400).json({ error: 'Placa já cadastrada no sistema.' });
       return;
     }
 
-    // Normalizar placa: remover espaços e converter para uppercase
-    const placaNorm = placa.replace(/[\s]/g, '').toUpperCase();
-
     db.prepare('INSERT INTO veiculos (cliente_id, placa, marca, modelo, ano, tipo) VALUES (?, ?, ?, ?, ?, ?)').run(
       req.user!.id,
-      placaNorm,
-      marca.trim(),
-      modelo.trim(),
-      ano ? parseInt(ano) : null,
-      tipo || 'carro'
+      resultado.dados.placa,
+      resultado.dados.marca,
+      resultado.dados.modelo,
+      resultado.dados.ano,
+      resultado.dados.tipo
     );
     res.status(201).json({ message: 'Veículo cadastrado!' });
   } catch (err: any) {
@@ -303,6 +409,47 @@ router.post('/veiculos', (req: AuthRequest, res: Response) => {
     else if (err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY')
       res.status(400).json({ error: 'Erro de conta. Faça logout e entre novamente.' });
     else res.status(500).json({ error: 'Erro ao cadastrar veículo: ' + err.message });
+  }
+});
+
+// PUT /api/cliente/veiculos/:id
+router.put('/veiculos/:id', (req: AuthRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Veículo inválido.' });
+      return;
+    }
+
+    const resultado = validarDadosVeiculo(req.body);
+    if ('error' in resultado) {
+      res.status(400).json({ error: resultado.error });
+      return;
+    }
+    if (placaJaCadastrada(resultado.dados.placa, id)) {
+      res.status(400).json({ error: 'Placa já cadastrada no sistema.' });
+      return;
+    }
+
+    const atualizacao = db
+      .prepare('UPDATE veiculos SET placa=?, marca=?, modelo=?, ano=?, tipo=? WHERE id=? AND cliente_id=?')
+      .run(
+        resultado.dados.placa,
+        resultado.dados.marca,
+        resultado.dados.modelo,
+        resultado.dados.ano,
+        resultado.dados.tipo,
+        id,
+        req.user!.id
+      );
+    if (atualizacao.changes === 0) {
+      res.status(404).json({ error: 'Veículo não encontrado.' });
+      return;
+    }
+    res.json({ message: 'Veículo atualizado.' });
+  } catch (err: any) {
+    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') res.status(400).json({ error: 'Placa já cadastrada no sistema.' });
+    else res.status(500).json({ error: 'Erro ao atualizar veículo: ' + err.message });
   }
 });
 
@@ -416,7 +563,7 @@ router.get('/favoritos', (req: AuthRequest, res: Response) => {
        FROM favoritos f
        JOIN oficinas o ON o.usuario_id=f.oficina_id
        JOIN usuarios u ON u.id=f.oficina_id
-       WHERE f.cliente_id=?
+       WHERE f.cliente_id=? AND o.status_aprovacao='aprovada' AND u.status='ativo'
        ORDER BY f.criado_em DESC`
       )
       .all(req.user!.id);
@@ -430,6 +577,16 @@ router.get('/favoritos', (req: AuthRequest, res: Response) => {
 router.post('/favoritos/:oficina_id', (req: AuthRequest, res: Response) => {
   try {
     const oficinaId = parseInt(req.params.oficina_id);
+    const oficinaVisivel = db
+      .prepare(
+        `SELECT o.usuario_id FROM oficinas o JOIN usuarios u ON u.id=o.usuario_id
+         WHERE o.usuario_id=? AND o.status_aprovacao='aprovada' AND u.status='ativo'`
+      )
+      .get(oficinaId);
+    if (!oficinaVisivel) {
+      res.status(404).json({ error: 'Oficina não encontrada.' });
+      return;
+    }
     db.prepare('INSERT OR IGNORE INTO favoritos (cliente_id, oficina_id) VALUES (?, ?)').run(req.user!.id, oficinaId);
     res.json({ message: 'Oficina favoritada!' });
   } catch (err: any) {
@@ -452,7 +609,14 @@ router.delete('/favoritos/:oficina_id', (req: AuthRequest, res: Response) => {
 router.get('/favorito/:oficina_id', (req: AuthRequest, res: Response) => {
   try {
     const oficinaId = parseInt(req.params.oficina_id);
-    const fav = db.prepare('SELECT id FROM favoritos WHERE cliente_id=? AND oficina_id=?').get(req.user!.id, oficinaId);
+    const fav = db
+      .prepare(
+        `SELECT f.id FROM favoritos f
+         JOIN oficinas o ON o.usuario_id=f.oficina_id
+         JOIN usuarios u ON u.id=o.usuario_id
+         WHERE f.cliente_id=? AND f.oficina_id=? AND o.status_aprovacao='aprovada' AND u.status='ativo'`
+      )
+      .get(req.user!.id, oficinaId);
     res.json({ favoritado: !!fav });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

@@ -33,11 +33,19 @@ function fmtDistancia(km) {
 // Ícones por categoria
 function catIcon(cat) {
   const icons = {
-    'Manutenção Preventiva': 'bi-wrench', 'Suspensão': 'bi-arrows-expand',
+    'Scanner / Diagnóstico': 'bi-tools', 'Diagnóstico': 'bi-tools', 'Manutenção Preventiva': 'bi-wrench', 'Suspensão': 'bi-arrows-expand',
     'Freios': 'bi-disc', 'Pneus': 'bi-circle', 'Elétrica': 'bi-lightning',
     'Climatização': 'bi-snow'
   };
   return icons[cat] || 'bi-tools';
+}
+
+function categoriasParaExibicao(categorias) {
+  const categoriasVisiveis = categorias
+    .map(c => c.categoria)
+    .filter(categoria => categoria && categoria !== 'Manutenção Preventiva' && categoria !== 'Diagnóstico');
+  categoriasVisiveis.push('Scanner / Diagnóstico');
+  return [...new Set(categoriasVisiveis)];
 }
 
 // ─── HOME ───────────────────────────────────────────
@@ -51,12 +59,12 @@ async function renderClienteHome(el) {
   const user = getUser();
   const firstName = user.nome.split(' ')[0];
 
-  const categoriasHtml = data.categorias.map(c => `
+  const categoriasHtml = categoriasParaExibicao(data.categorias).map(categoria => `
     <div class="col-4 col-md-2">
-      <a href="#cliente-busca?categoria=${encodeURIComponent(c.categoria)}" class="text-decoration-none">
+      <a href="#cliente-busca?categoria=${encodeURIComponent(categoria)}" class="text-decoration-none">
         <div class="categoria-card">
-          <i class="bi ${catIcon(c.categoria)} categoria-icon"></i>
-          <div class="mt-2 small fw-medium text-dark">${escapeHtml(c.categoria)}</div>
+          <i class="bi ${catIcon(categoria)} categoria-icon"></i>
+          <div class="mt-2 small fw-medium text-dark">${escapeHtml(categoria)}</div>
         </div>
       </a>
     </div>`).join('');
@@ -122,7 +130,8 @@ async function renderClienteBusca(el, params) {
   const locQuery = userLocation.lat ? `&lat=${userLocation.lat}&lng=${userLocation.lng}` : '';
 
   const data = await api(`/cliente/busca?q=${encodeURIComponent(q)}&categoria=${encodeURIComponent(categoria)}&cidade=${encodeURIComponent(cidade)}${locQuery}`);
-  const catOptions = data.categorias.map(c => `<option ${categoria===c.categoria?'selected':''}>${escapeHtml(c.categoria)}</option>`).join('');
+  const catOptions = categoriasParaExibicao(data.categorias)
+    .map(c => `<option value="${escapeHtml(c)}" ${categoria === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
 
   const oficinasHtml = data.oficinas.length === 0
     ? `<div class="empty-state"><i class="bi bi-search"></i><p>Nenhuma oficina encontrada.<br><small class="text-muted">Tente outros filtros.</small></p></div>`
@@ -680,7 +689,7 @@ function validarPlaca(placa) {
   return { valida: false, formato: null, normalizada: placa };
 }
 
-async function renderClienteVeiculos(el) {
+async function renderClienteVeiculos(el, veiculoEdicao = null) {
   el.innerHTML = '<div class="loading">Carregando...</div>';
   const data = await api('/cliente/veiculos');
 
@@ -698,7 +707,10 @@ async function renderClienteVeiculos(el) {
         </div>
         <div class="d-flex justify-content-between align-items-center mt-3 pt-2" style="border-top:1px solid var(--tm-gray-100)">
           <div class="placa-badge">${escapeHtml(v.placa)}</div>
-          <button class="btn btn-sm btn-outline-danger" onclick="excluirVeiculo(${v.id})"><i class="bi bi-trash3"></i></button>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-primary btn-editar-veiculo" data-id="${v.id}" aria-label="Editar veículo"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-danger" onclick="excluirVeiculo(${v.id})" aria-label="Excluir veículo"><i class="bi bi-trash3"></i></button>
+          </div>
         </div>
       </div>
     </div>`).join('');
@@ -711,41 +723,41 @@ async function renderClienteVeiculos(el) {
       </button>
     </div>
 
-    <div id="form-veiculo-card" class="card p-4 mb-4 ${data.veiculos.length ? 'd-none' : ''}">
-      <h6 class="fw-bold mb-1">Cadastrar Veículo</h6>
+    <div id="form-veiculo-card" class="card p-4 mb-4 ${data.veiculos.length && !veiculoEdicao ? 'd-none' : ''}">
+      <h6 class="fw-bold mb-1">${veiculoEdicao ? 'Editar Veículo' : 'Cadastrar Veículo'}</h6>
       <p class="text-muted small mb-3">Aceita placa antiga (ABC-1234) ou Mercosul (ABC1D23)</p>
       <form id="form-veiculo">
         <div class="row g-3">
           <div class="col-md-4 col-6">
             <label class="form-label">Placa *</label>
-            <input id="v-placa" class="form-control text-uppercase" placeholder="ABC1D23 ou ABC-1234" required maxlength="8">
+            <input id="v-placa" class="form-control text-uppercase" placeholder="ABC1D23 ou ABC-1234" required maxlength="8" value="${veiculoEdicao ? escapeHtml(veiculoEdicao.placa) : ''}">
             <div id="v-placa-feedback" class="form-text"></div>
           </div>
           <div class="col-md-2 col-6">
             <label class="form-label">Tipo</label>
             <select id="v-tipo" class="form-select">
-              <option value="carro">🚗 Automóvel</option>
-              <option value="moto">🏍️ Motocicleta</option>
+              <option value="carro" ${veiculoEdicao?.tipo !== 'moto' ? 'selected' : ''}>🚗 Automóvel</option>
+              <option value="moto" ${veiculoEdicao?.tipo === 'moto' ? 'selected' : ''}>🏍️ Motocicleta</option>
             </select>
           </div>
           <div class="col-md-3 col-6">
             <label class="form-label">Marca *</label>
-            <input id="v-marca" class="form-control" list="lista-marcas" required placeholder="Ex: Honda">
+            <input id="v-marca" class="form-control" list="lista-marcas" required placeholder="Ex: Honda" value="${veiculoEdicao ? escapeHtml(veiculoEdicao.marca) : ''}">
             <datalist id="lista-marcas"></datalist>
           </div>
           <div class="col-md-3 col-6">
             <label class="form-label">Modelo *</label>
-            <input id="v-modelo" class="form-control" required placeholder="Ex: Civic">
+            <input id="v-modelo" class="form-control" required placeholder="Ex: Civic" value="${veiculoEdicao ? escapeHtml(veiculoEdicao.modelo) : ''}">
           </div>
           <div class="col-md-2 col-4">
             <label class="form-label">Ano</label>
-            <input type="number" id="v-ano" min="1980" max="2030" class="form-control" placeholder="2020">
+            <input type="number" id="v-ano" min="1980" max="2030" class="form-control" placeholder="2020" value="${veiculoEdicao?.ano || ''}">
           </div>
           <div class="col-md-10 col-8 d-flex align-items-end gap-2">
-            <button type="submit" class="btn btn-tm-accent" id="btn-cadastrar-veiculo">
-              <i class="bi bi-plus-circle"></i> Cadastrar Veículo
+            <button type="submit" class="btn btn-tm-accent" id="btn-salvar-veiculo">
+              <i class="bi ${veiculoEdicao ? 'bi-check-circle' : 'bi-plus-circle'}"></i> ${veiculoEdicao ? 'Salvar Alterações' : 'Cadastrar Veículo'}
             </button>
-            <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('form-veiculo-card').classList.add('d-none')">Cancelar</button>
+            <button type="button" class="btn btn-outline-secondary" id="btn-cancelar-veiculo">Cancelar</button>
           </div>
         </div>
       </form>
@@ -756,8 +768,25 @@ async function renderClienteVeiculos(el) {
 
   // Event listeners
   document.getElementById('btn-add-veiculo')?.addEventListener('click', () => {
-    document.getElementById('form-veiculo-card').classList.remove('d-none');
-    document.getElementById('v-placa')?.focus();
+    if (veiculoEdicao) {
+      renderClienteVeiculos(el).then(() => {
+        document.getElementById('form-veiculo-card')?.classList.remove('d-none');
+        document.getElementById('v-placa')?.focus();
+      });
+    } else {
+      document.getElementById('form-veiculo-card').classList.remove('d-none');
+      document.getElementById('v-placa')?.focus();
+    }
+  });
+  document.getElementById('btn-cancelar-veiculo')?.addEventListener('click', () => {
+    if (veiculoEdicao) renderClienteVeiculos(el);
+    else document.getElementById('form-veiculo-card').classList.add('d-none');
+  });
+  el.querySelectorAll('.btn-editar-veiculo').forEach(button => {
+    button.addEventListener('click', () => {
+      const veiculo = data.veiculos.find(v => v.id === Number(button.dataset.id));
+      if (veiculo) renderClienteVeiculos(el, veiculo);
+    });
   });
 
   // Validação de placa em tempo real
@@ -810,13 +839,13 @@ async function renderClienteVeiculos(el) {
       return;
     }
 
-    const btn = document.getElementById('btn-cadastrar-veiculo');
+    const btn = document.getElementById('btn-salvar-veiculo');
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Cadastrando...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Salvando...';
 
     try {
-      await api('/cliente/veiculos', {
-        method: 'POST',
+      await api(veiculoEdicao ? `/cliente/veiculos/${veiculoEdicao.id}` : '/cliente/veiculos', {
+        method: veiculoEdicao ? 'PUT' : 'POST',
         body: {
           placa: result.normalizada,
           marca: marca,
@@ -825,12 +854,12 @@ async function renderClienteVeiculos(el) {
           tipo: tipo
         }
       });
-      showToast('Veículo cadastrado com sucesso!', 'success');
+      showToast(veiculoEdicao ? 'Veículo atualizado com sucesso!' : 'Veículo cadastrado com sucesso!', 'success');
       await renderClienteVeiculos(el);
     } catch (err) {
       btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-plus-circle"></i> Cadastrar Veículo';
-      showToast(err.error || 'Erro ao cadastrar veículo', 'error');
+      btn.innerHTML = `<i class="bi ${veiculoEdicao ? 'bi-check-circle' : 'bi-plus-circle'}"></i> ${veiculoEdicao ? 'Salvar Alterações' : 'Cadastrar Veículo'}`;
+      showToast(err.error || (veiculoEdicao ? 'Erro ao atualizar veículo' : 'Erro ao cadastrar veículo'), 'error');
     }
   });
 }
