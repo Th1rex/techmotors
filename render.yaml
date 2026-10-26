@@ -31,7 +31,7 @@ services:
 
     envVars:
       - key: NODE_VERSION
-        value: 22.9.0
+        value: 22.22.0
       - key: NODE_ENV
         value: production
       # Caminho do SQLite no disco persistente (somente com plano pago + disco)
