@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "ts-node src/server.ts",
+    "dev": "npm run build && npm start",
     "setup": "ts-node src/setup.ts",
     "lint": "eslint src/ --ext .ts",
     "lint:fix": "eslint src/ --ext .ts --fix",
