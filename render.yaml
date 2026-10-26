@@ -3,6 +3,11 @@
 #
 # Este arquivo permite criar o serviço automaticamente pelo Render
 # (Dashboard > New > Blueprint > selecione este repositório).
+#
+# PLANO FREE: o disco do serviço é temporário. O banco SQLite volta aos
+# dados de teste (seed) a cada deploy, reinício ou quando o serviço "dorme"
+# após 15 minutos sem acesso (ele leva cerca de 1 minuto para acordar).
+# Para a apresentação, abra o site alguns minutos antes.
 
 services:
   - type: web
@@ -11,26 +16,27 @@ services:
     plan: free
     region: oregon # troque para a região mais próxima, se preferir
     rootDir: backend # o app (package.json) fica em backend/
-    buildCommand: npm install && npm run build
+    # --include=dev é obrigatório: com NODE_ENV=production o npm pula as
+    # devDependencies, e sem o TypeScript o "npm run build" (tsc) falha
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /
 
-    # Disco persistente para o banco SQLite não sumir entre deploys/reinícios.
-    # OBS: discos persistentes exigem plano pago (Starter+). No plano free,
-    # o SQLite funciona mas os dados são resetados a cada deploy.
-    disk:
-      name: techmotors-data
-      mountPath: /var/data
-      sizeGB: 1
+    # Para os dados não sumirem, troque "plan: free" por "plan: starter"
+    # (pago) e descomente o disco abaixo e a variável DB_PATH.
+    # disk:
+    #   name: techmotors-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
 
     envVars:
       - key: NODE_VERSION
         value: 22.9.0
       - key: NODE_ENV
         value: production
-      # Caminho do SQLite dentro do disco persistente
-      - key: DB_PATH
-        value: /var/data/techmotors.db
+      # Caminho do SQLite no disco persistente (somente com plano pago + disco)
+      # - key: DB_PATH
+      #   value: /var/data/techmotors.db
       # JWT_SECRET: o Render gera um valor aleatório e seguro
       - key: JWT_SECRET
         generateValue: true
